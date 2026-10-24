@@ -1,0 +1,10 @@
+.env
+logs/
+portefeuille_*.json
+portefeuille_*.json.ancien
+journal_*.csv
+journal_*.csv.ancien
+config_trading.json
+__pycache__/
+.ruff_cache/
+.DS_Store
