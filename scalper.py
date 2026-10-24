@@ -29,6 +29,7 @@ import logging
 import math
 import os
 import queue
+import random
 import sys
 import threading
 import time
@@ -138,7 +139,8 @@ def model_key(family, profile, maker):
 class SimTrade:
     __slots__ = ("side", "profile", "key", "features", "p", "notional", "maker_entry", "limit", "queue", "deadline",
                  "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
-                 "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed")
+                 "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed",
+                 "explore")
 
     def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0):
         self.side, self.profile, self.features, self.p, self.notional = side, profile, features, p, notional
@@ -150,6 +152,7 @@ class SimTrade:
         self.entry = self.opened = self.exit = self.reason = self.closed = None
         self.order_id = self.market = self.tp_id = self.sl_id = None
         self.qty = 0.0
+        self.explore = False
         self.fee_bps = 0.0
         if self.maker_entry:
             # Ordre limite au meilleur prix de notre côté : on rejoint la file d'attente existante.
@@ -252,6 +255,8 @@ class Scalper:
         self.msg_total = 0
         self.offset_ms = 0.0
         self.equity_cache = self.state["cash"]
+        self.explore_times = collections.deque()  # instants des trades d'exploration (dernière heure)
+        self.rng = random.Random()
         self._stop = threading.Event()
 
     # -- état ---------------------------------------------------------------------
@@ -271,7 +276,8 @@ class Scalper:
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
                 "modeles": {}, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
                 "stats": {"trades": 0, "gagnants": 0, "pnl": 0.0, "frais": 0.0, "volume": 0.0,
-                          "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time()}}
+                          "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time(),
+                          "exploration": 0, "exploration_pnl": 0.0}}
 
     def save(self):
         self.state["modeles"] = {k: m.to_dict() for k, m in self.models.items()}
@@ -461,6 +467,22 @@ class Scalper:
         if best and best[0] >= cfg["scalp_ev_min_bps"]:
             _, prof, maker, key, p, win, loss, ev = best
             self.open(c, t, side, prof, maker, key, x, p, win, loss, ev)
+        elif self.can_explore(t):
+            # Exploration : petit trade réel sur une variante tirée au hasard, pour apprendre en tradant.
+            fam, prof, maker = self.rng.choice([v for v in self.variants if v[0] == family])
+            key = model_key(fam, prof, maker)
+            m = self.models[key]
+            p = m.calibrated(x)[0] if m.seen >= 50 else m.base_rate
+            ev, win, loss = self.expected(prof, p, maker)
+            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True)
+
+    def can_explore(self, t):
+        cfg = self.cfg
+        if not cfg["scalp_exploration"] or (self.mode != "papier" and not cfg["scalp_exploration_reel"]):
+            return False
+        while self.explore_times and self.explore_times[0] < t - 3600000:
+            self.explore_times.popleft()
+        return len(self.explore_times) < cfg["scalp_exploration_par_heure"]
 
     def can_open(self):
         st, cfg = self.state, self.cfg
@@ -479,20 +501,24 @@ class Scalper:
     def exposure(self):
         return sum(s.notional for s in self.trades.values())
 
-    def open(self, c, t, side, prof, maker, key, x, p, win, loss, ev):
+    def open(self, c, t, side, prof, maker, key, x, p, win, loss, ev, explore=False):
         cfg = self.cfg
         eq = self.equity_cache
-        pct = self.size_pct(p, win, loss)
+        pct = cfg["scalp_exploration_taille_pct"] if explore else self.size_pct(p, win, loss)
         notional = min(eq * pct / 100, eq * cfg["levier_max"] - self.exposure())
         if notional < 10:
             return
         sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional)
+        sim.explore = explore
         self.state["stats"]["ordres"] += 1
         if self.mode != "papier" and not self._send_entry(c, sim):
             return
         self.trades[c] = sim
-        log.info("{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
-            red("▼ SHORT") if side == "short" else green("▲ LONG"), self.coins[c]["base"],
+        if explore:
+            self.explore_times.append(t)
+        log.info("{}{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
+            cyan("[exploration] ") if explore else "", red("▼ SHORT") if side == "short" else green("▲ LONG"),
+            self.coins[c]["base"],
             "limite" if sim.maker_entry else "marché", fmt_price(sim.limit or sim.entry, "usd"),
             key, p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
 
@@ -521,23 +547,30 @@ class Scalper:
         s["pnl"] += pnl
         s["frais"] += sim.notional * sim.fee_bps / 1e4
         s["volume"] += sim.notional * 2
-        st["serie_pertes"] = 0 if pnl > 0 else st["serie_pertes"] + 1
         self.learn(c, sim)
         sym = st["cryptos"].setdefault(c, {"edge": 0.0, "n": 0})
-        sym["reel"] = (sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):] + [net_bps]
         sym["pause_jusqua"] = sim.closed + self.cfg["scalp_pause_s"] * 1000
-        if len(sym["reel"]) >= QUARANTINE_TRADES and \
+        if sim.explore:
+            # Les trades d'exploration sont pris sans espérance positive : ils ne doivent ni réduire la
+            # taille des trades décidés par le modèle ni mettre une crypto en quarantaine.
+            s["exploration"] = s.get("exploration", 0) + 1
+            s["exploration_pnl"] = s.get("exploration_pnl", 0.0) + pnl
+        else:
+            st["serie_pertes"] = 0 if pnl > 0 else st["serie_pertes"] + 1
+            sym["reel"] = (sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):] + [net_bps]
+        if not sim.explore and len(sym["reel"]) >= QUARANTINE_TRADES and \
                 sum(sym["reel"]) / len(sym["reel"]) <= self.cfg["scalp_quarantaine_bps"]:
             sym["pause_jusqua"], sym["reel"] = sim.closed + QUARANTINE_MS, []
             log.info(yellow("  {} en quarantaine 1 h : ses {} derniers trades réels perdent en moyenne".format(
                 self.coins[c]["base"], QUARANTINE_TRADES)))
         duration = (sim.closed - sim.opened) / 1000
-        self.journal(crypto=self.coins[c]["base"], sens=sim.side, profil=sim.key, proba=round(sim.p, 3),
+        self.journal(crypto=self.coins[c]["base"], sens=sim.side,
+                     profil=("explo:" if sim.explore else "") + sim.key, proba=round(sim.p, 3),
                      entree=sim.entry, sortie=sim.exit, notionnel=round(sim.notional, 2), duree_s=round(duration, 2),
                      brut_bps=round(sim.gross_bps(), 2), net_bps=round(net_bps, 2), pnl=round(pnl, 4),
                      raison=sim.reason)
-        log.info("  ✕ {} {} {} en {:.1f} s → {} {}".format(
-            sim.side.upper(), self.coins[c]["base"], sim.reason, duration,
+        log.info("  ✕ {}{} {} {} en {:.1f} s → {} {}".format(
+            "[exploration] " if sim.explore else "", sim.side.upper(), self.coins[c]["base"], sim.reason, duration,
             (green if pnl >= 0 else red)("{:+.2f} $".format(pnl)),
             dim("(brut {:+.1f} pb, net {:+.1f} pb)".format(sim.gross_bps(), net_bps))))
         self.save()
@@ -692,7 +725,9 @@ class Scalper:
                 "valeur": round(eq, 2), "realise": round(s["pnl"], 2), "latent": round(eq - st["cash"], 2),
                 "trades": s["trades"], "gagnants": s["gagnants"], "frais": round(s["frais"], 2),
                 "trades_par_heure": round(s["trades"] / hours, 1), "debut": s["debut"],
-                "apprentissage": self.ready(), "fantomes": s["fantomes"], "positions": positions}
+                "apprentissage": self.ready(), "fantomes": s["fantomes"], "positions": positions,
+                "exploration": s.get("exploration", 0), "exploration_pnl": round(s.get("exploration_pnl", 0.0), 2),
+                "exploration_heure": len(self.explore_times)}
 
     def append_curve(self, snap):
         new = not os.path.exists(self.curve_path)
@@ -888,6 +923,7 @@ def format_balance(snap):
         "  {} trades ({}/h) · gagnants {:.0f}% · {} exemples appris{}".format(
             snap["trades"], snap["trades_par_heure"], rate, snap["fantomes"],
             "" if snap["apprentissage"] else " · apprentissage en cours"),
+        "  dont exploration : {} trades, {:+.2f} $".format(snap.get("exploration", 0), snap.get("exploration_pnl", 0.0)),
     ]
     for p in snap["positions"]:
         if p.get("pnl") is not None:

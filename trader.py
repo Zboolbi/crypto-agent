@@ -101,6 +101,10 @@ DEFAULT_CONFIG = {
     "scalp_fantomes_max": 3000,
     "scalp_positions_max": 5,
     "scalp_long": False,               # short uniquement
+    "scalp_exploration": True,         # trades réels de petite taille pendant et après l'apprentissage
+    "scalp_exploration_taille_pct": 2,  # taille d'un trade d'exploration, en % du capital
+    "scalp_exploration_par_heure": 60,
+    "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
     "scalp_filtre_tendance": 20,       # pas de short si le score 15 min dépasse ce seuil
 }
 DEFAULT_CONFIG.update(PROFILES["agressif"])

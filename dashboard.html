@@ -240,7 +240,8 @@ function render() {
     setText('kPnl', sUsd(total), cls(total)); $('kPnlSub').textContent = sPct(total / s.capital_initial * 100) + ' du capital';
     setText('kReal', sUsd(s.realise), cls(s.realise)); $('kFees').textContent = 'Frais payés : ' + usd(s.frais);
     setText('kOpen', sUsd(s.latent), cls(s.latent)); $('kOpenSub').textContent = s.positions.length + ' position(s) ou ordre(s)';
-    setText('kTrades', nf(0).format(s.trades)); $('kTradesSub').textContent = nf(1).format(s.trades_par_heure) + ' par heure en moyenne';
+    setText('kTrades', nf(0).format(s.trades));
+    $('kTradesSub').textContent = nf(1).format(s.trades_par_heure) + ' / h · dont ' + (s.exploration || 0) + ' d’exploration (' + sUsd(s.exploration_pnl || 0) + ')';
     setText('kWin', pct(rate), rate == null ? '' : rate >= .5 ? 'pos' : 'neg'); $('kWinSub').textContent = s.gagnants + ' gagnants sur ' + s.trades;
   }
   setText('kEv', bps(st.esperance_bps), cls(st.esperance_bps));
@@ -284,7 +285,8 @@ function render() {
     'Aucune position ouverte.');
 
   table('trades', [['Heure'], ['Crypto'], ['Variante'], ['Durée', 'num'], ['Proba', 'num'], ['Net', 'num'], ['P&L', 'num'], ['Sortie']],
-    tr.slice().reverse().map(t => [td(esc(t.date.slice(11)), 'mut'), td(`<b>${esc(t.crypto)}</b>`), td(`<span class="tag">${esc(t.profil)}</span>`),
+    tr.slice().reverse().map(t => [td(esc(t.date.slice(11)), 'mut'), td(`<b>${esc(t.crypto)}</b>`),
+      td(t.profil.startsWith('explo:') ? `<span class="tag" style="color:${C.blue}">exploration</span> <span class="tag">${esc(t.profil.slice(6))}</span>` : `<span class="tag">${esc(t.profil)}</span>`),
       td(nf(1).format(+t.duree_s) + ' s', 'num'), td(pct(+t.proba), 'num'), td(bps(+t.net_bps), 'num ' + cls(+t.net_bps)),
       td(sUsd(+t.pnl), 'num ' + cls(+t.pnl)), td(esc(t.raison), 'mut')]),
     'Aucun trade réel pour l’instant.');

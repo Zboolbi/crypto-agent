@@ -106,7 +106,9 @@ class LearnerTest(unittest.TestCase):
 class ScalperTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.sc = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=self.tmp.name)
+        cfg = json.loads(json.dumps(CFG))
+        cfg["scalp_exploration"] = False  # ces tests vérifient les décisions du modèle seul
+        self.sc = scalper.Scalper("papier", cfg, state_dir=self.tmp.name)
         self.sc.coins = {"BTCUSDT": {"base": "BTC"}}
         self.sc.books = {"BTCUSDT": scalper.Book()}
 
@@ -189,6 +191,57 @@ class ScalperTest(unittest.TestCase):
             snap = json.load(f)
         self.assertEqual(snap["valeur"], CFG["capital_initial"])
         self.assertIn("Valeur actuelle", scalper.format_balance(snap))
+
+
+class ExplorationTest(unittest.TestCase):
+    def make(self, mode="papier", **over):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        cfg = json.loads(json.dumps(CFG))
+        cfg.update(over)
+        sc = scalper.Scalper(mode, cfg, state_dir=self.tmp.name)
+        sc.coins = {"BTCUSDT": {"base": "BTC"}}
+        sc.books = {"BTCUSDT": scalper.Book()}
+        return sc
+
+    def burst(self, sc, t0):
+        sc.on_depth("BTCUSDT", t0, [["99.99", "5"]] * 5, [["100", "1"]] * 5)
+        for i in range(30):
+            sc.on_trade("BTCUSDT", t0 + i * 200, 100 * (1 - i * 0.0001), 1000.0, True)
+
+    def test_trades_while_learning_with_small_size(self):
+        sc = self.make()
+        self.burst(sc, 10000)
+        self.assertFalse(sc.ready(), "le modèle est encore en apprentissage")
+        sim = sc.trades.get("BTCUSDT")
+        self.assertIsNotNone(sim, "un trade d'exploration doit être passé pendant l'apprentissage")
+        self.assertTrue(sim.explore)
+        self.assertAlmostEqual(sim.notional, sc.equity_cache * CFG["scalp_exploration_taille_pct"] / 100)
+
+    def test_hourly_cap(self):
+        sc = self.make(scalp_exploration_par_heure=1)
+        self.burst(sc, 10000)
+        sc.trades.clear()
+        self.burst(sc, 20000)
+        self.assertFalse(sc.trades, "plafond horaire d'exploration respecté")
+
+    def test_exploration_loss_does_not_quarantine_or_shrink(self):
+        sc = self.make()
+        for i in range(6):
+            sim = scalper.SimTrade("short", i * 1000, book(), PROFILE, CFG, False, features=[0.0] * len(FEATURES),
+                                   p=0.3, notional=200.0)
+            sim.explore = True
+            sim._close(i * 1000 + 500, sim.entry * 1.003, False, "stop")
+            sc.record("BTCUSDT", sim)
+        self.assertFalse(sc.paused("BTCUSDT", 10000))
+        self.assertEqual(sc.state["serie_pertes"], 0)
+        self.assertEqual(sc.state["stats"]["exploration"], 6)
+        self.assertLess(sc.state["stats"]["exploration_pnl"], 0)
+
+    def test_disabled_in_real_mode_by_default(self):
+        sc = self.make()
+        sc.mode = "reel"
+        self.assertFalse(sc.can_explore(0))
 
 
 class CalibrationTest(unittest.TestCase):
