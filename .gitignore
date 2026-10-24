@@ -13,3 +13,4 @@ etat_*.json.tmp
 .scalper_*.lock
 courbe_*.csv
 .venv/
+point_de_depart.json

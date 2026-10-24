@@ -109,6 +109,19 @@ DEFAULT_CONFIG = {
     "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
     "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
     "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
+    "scalp_exploration_budget_jour_pct": 1,  # pertes d'exploration tolérées par jour, en % du capital (0 = sans limite)
+    # -- arbitrage du taux de financement (funding.py) --
+    "funding_capital": 10000,          # capital fictif dédié ($)
+    "funding_positions_max": 5,        # réglages issus du balayage sur 11 mois de taux réels
+    "funding_levier": 2,               # levier de la jambe perpétuelle (marge = notionnel / levier)
+    "funding_entree_annuel_pct": 9,   # taux annualisé minimal pour entrer (moyenne récente et taux en cours)
+    "funding_sortie_annuel_pct": 0,    # sortie quand la moyenne récente tombe sous ce seuil
+    "funding_fenetre_h": 168,          # fenêtre de la moyenne des taux
+    "funding_horizon_j": 30,           # durée de détention envisagée pour couvrir les frais
+    "funding_marge_frais": 1.0,        # gain attendu ≥ les frais aller-retour
+    "funding_ecart_max_pct": 0.3,      # écart perpétuel/comptant maximal à l'entrée
+    "funding_volume_min_usd": 20000000,
+    "frais_comptant_pct": 0.1,         # frais d'un ordre au comptant (Binance, sans réduction BNB)
     "scalp_filtre_tendance": 20,       # pas de short si le score 15 min dépasse ce seuil
 }
 DEFAULT_CONFIG.update(PROFILES["agressif"])

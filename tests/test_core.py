@@ -296,6 +296,14 @@ class ExplorationTest(unittest.TestCase):
         self.assertEqual(sc.state["stats"]["exploration"], 6)
         self.assertLess(sc.state["stats"]["exploration_pnl"], 0)
 
+    def test_daily_loss_budget_stops_exploration(self):
+        sc = self.make(scalp_exploration_budget_jour_pct=1)  # 1 % de 10 000 $ = 100 $
+        self.assertTrue(sc.can_explore(0, "BTCUSDT"))
+        sc.state["exploration_jour"] = {"date": str(scalper.date.today()), "pnl": -100.0}
+        self.assertFalse(sc.can_explore(0, "BTCUSDT"), "budget du jour épuisé")
+        sc.state["exploration_jour"]["date"] = "2000-01-01"
+        self.assertTrue(sc.can_explore(0, "BTCUSDT"), "nouveau jour, nouveau budget")
+
     def test_disabled_in_real_mode_by_default(self):
         sc = self.make()
         sc.mode = "reel"

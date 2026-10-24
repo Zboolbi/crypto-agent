@@ -514,6 +514,10 @@ class Scalper:
         cfg = self.cfg
         if not cfg["scalp_exploration"] or (self.mode != "papier" and not cfg["scalp_exploration_reel"]):
             return False
+        budget = cfg["scalp_exploration_budget_jour_pct"] / 100 * cfg["capital_initial"]
+        day = self.state.setdefault("exploration_jour", {"date": "", "pnl": 0.0})
+        if day["date"] == str(date.today()) and budget and day["pnl"] <= -budget:
+            return False  # budget de pertes du jour épuisé : l'agent continue d'apprendre par les fantômes
         if c and t - self.last_explore.get(c, -1e18) < cfg["scalp_exploration_espacement_s"] * 1000:
             return False  # pas deux explorations de suite sur la même crypto
         if not cfg["scalp_exploration_par_heure"]:
@@ -597,6 +601,10 @@ class Scalper:
             # taille des trades décidés par le modèle ni mettre une crypto en quarantaine.
             s["exploration"] = s.get("exploration", 0) + 1
             s["exploration_pnl"] = s.get("exploration_pnl", 0.0) + pnl
+            day = st.setdefault("exploration_jour", {"date": "", "pnl": 0.0})
+            if day["date"] != str(date.today()):
+                day.update(date=str(date.today()), pnl=0.0)
+            day["pnl"] += pnl
         else:
             st["serie_pertes"] = 0 if pnl > 0 else st["serie_pertes"] + 1
             sym["reel"] = (sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):] + [net_bps]

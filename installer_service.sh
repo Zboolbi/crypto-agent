@@ -62,6 +62,14 @@ plist "$LABEL" "$DIR/logs/agent_$MODE.log" \
 plist "$DASH" "$DIR/logs/dashboard.log" \
   "<string>$PY</string><string>$DIR/dashboard.py</string><string>--mode</string><string>$MODE</string>"
 
+if [ "$MODE" = "papier" ]; then
+  # Stratégies comparées en parallèle, chacune avec son portefeuille fictif.
+  plist "com.cryptoagent.funding" "$DIR/logs/funding_papier.log" \
+    "<string>$PY</string><string>$DIR/funding.py</string><string>lancer</string>"
+  plist "com.cryptoagent.tendance" "$DIR/logs/tendance_papier.log" \
+    "<string>$PY</string><string>$DIR/trader.py</string><string>--mode</string><string>papier</string><string>auto</string>"
+fi
+
 echo "✓ Agent $LABEL et tableau de bord installés et démarrés (Python : $PY)."
 echo "  Tableau de bord   : http://localhost:8050"
 echo "  Solde en direct   : $PY scalper.py solde --suivre"
