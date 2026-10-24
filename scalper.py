@@ -146,7 +146,9 @@ class SimTrade:
         self.side, self.profile, self.features, self.p, self.notional = side, profile, features, p, notional
         self.key = key or model_key("elan", profile, maker)
         self.maker_bps, self.taker_bps = cfg["frais_maker_pct"] * 100, cfg["frais_pct"] * 100
-        self.flow_exit = cfg["scalp_sortie_flux"]
+        # Un short « rebond » est ouvert pendant une pression acheteuse : sortir dès que les achats
+        # dominent le fermerait aussitôt. La sortie sur flux inversé ne vaut que pour « elan ».
+        self.flow_exit = None if self.key.startswith("rebond/") else cfg["scalp_sortie_flux"]
         self.maker_entry = maker
         self.max_ms = profile["duree_s"] * 1000
         self.entry = self.opened = self.exit = self.reason = self.closed = None
@@ -201,7 +203,7 @@ class SimTrade:
             # L'objectif est un ordre limite au repos : exécuté si le prix le traverse.
             if (short and price < self.tp) or (not short and price > self.tp):
                 self._close(t, self.tp, True, "objectif")
-            elif t - self.opened > 1000:
+            elif self.flow_exit is not None and t - self.opened > 1000:
                 f = book.flow()
                 if (short and f >= self.flow_exit) or (not short and f <= -self.flow_exit):
                     self._close(t, book.ask if short else book.bid, False, "flux inversé")
@@ -267,6 +269,11 @@ class Scalper:
                 st = json.load(f)
             if "modeles" in st:
                 st.setdefault("remplissage", {})
+                if st.get("version_modeles", 1) < 2:
+                    # Modèles « rebond » entraînés avec une sortie sur flux inversé erronée : on repart de zéro.
+                    for k in [k for k in st["modeles"] if k.startswith("rebond/")]:
+                        del st["modeles"][k]
+                    st["version_modeles"] = 2
                 return st
             # ancien format, sans apprentissage : archivé
             os.replace(self.state_path, self.state_path + ".ancien")
@@ -274,7 +281,7 @@ class Scalper:
                 os.replace(self.journal_path, self.journal_path + ".ancien")
         cap = self.cfg["capital_initial"]
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
-                "modeles": {}, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
+                "modeles": {}, "version_modeles": 2, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
                 "stats": {"trades": 0, "gagnants": 0, "pnl": 0.0, "frais": 0.0, "volume": 0.0,
                           "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time(),
                           "exploration": 0, "exploration_pnl": 0.0}}
@@ -482,6 +489,9 @@ class Scalper:
             return False
         while self.explore_times and self.explore_times[0] < t - 3600000:
             self.explore_times.popleft()
+        spacing = 3600000 / max(1, cfg["scalp_exploration_par_heure"])  # réparti sur l'heure, pas en rafale
+        if self.explore_times and t - self.explore_times[-1] < spacing:
+            return False
         return len(self.explore_times) < cfg["scalp_exploration_par_heure"]
 
     def can_open(self):

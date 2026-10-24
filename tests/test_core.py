@@ -211,12 +211,17 @@ class ExplorationTest(unittest.TestCase):
 
     def test_trades_while_learning_with_small_size(self):
         sc = self.make()
+        opened = []
+        real_open = sc.open
+        sc.open = lambda *a, **k: (opened.append(k.get("explore")), real_open(*a, **k))
         self.burst(sc, 10000)
         self.assertFalse(sc.ready(), "le modèle est encore en apprentissage")
+        self.assertEqual(opened, [True], "un seul trade d'exploration, puis attente d'une minute")
+        self.assertEqual(sc.state["stats"]["ordres"], 1)
         sim = sc.trades.get("BTCUSDT")
-        self.assertIsNotNone(sim, "un trade d'exploration doit être passé pendant l'apprentissage")
-        self.assertTrue(sim.explore)
-        self.assertAlmostEqual(sim.notional, sc.equity_cache * CFG["scalp_exploration_taille_pct"] / 100)
+        if sim:  # l'ordre limite peut avoir expiré pendant la chute simulée
+            self.assertTrue(sim.explore)
+            self.assertAlmostEqual(sim.notional, sc.equity_cache * CFG["scalp_exploration_taille_pct"] / 100)
 
     def test_hourly_cap(self):
         sc = self.make(scalp_exploration_par_heure=1)
@@ -224,6 +229,13 @@ class ExplorationTest(unittest.TestCase):
         sc.trades.clear()
         self.burst(sc, 20000)
         self.assertFalse(sc.trades, "plafond horaire d'exploration respecté")
+
+    def test_spread_over_the_hour(self):
+        sc = self.make(scalp_exploration_par_heure=60)
+        self.assertTrue(sc.can_explore(0))
+        sc.explore_times.append(0)
+        self.assertFalse(sc.can_explore(30000), "pas deux trades d'exploration à moins d'une minute")
+        self.assertTrue(sc.can_explore(60000))
 
     def test_exploration_loss_does_not_quarantine_or_shrink(self):
         sc = self.make()
@@ -242,6 +254,16 @@ class ExplorationTest(unittest.TestCase):
         sc = self.make()
         sc.mode = "reel"
         self.assertFalse(sc.can_explore(0))
+
+
+class RebondExitTest(unittest.TestCase):
+    def test_rebound_short_is_not_closed_by_buy_pressure(self):
+        b = book()
+        for key, expect_exit in (("rebond/eclair/marche", False), ("elan/eclair/marche", True)):
+            s = scalper.SimTrade("short", 0, b, PROFILE, CFG, False, key)
+            b.add_trade(500, 100.0, 50000.0, 10000)   # forte pression acheteuse
+            s.on_trade(2000, 100.0, 1.0, False, b)
+            self.assertEqual(s.state == "ferme", expect_exit, key)
 
 
 class CalibrationTest(unittest.TestCase):
