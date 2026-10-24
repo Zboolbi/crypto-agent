@@ -132,11 +132,14 @@ class ScalperTest(unittest.TestCase):
     def test_shadows_first_then_real_trade_when_model_confident(self):
         sc = self.sc
         self._sell_burst(10000)
-        self.assertIn("BTCUSDT", sc.last_shadow, "des trades fantômes doivent être lancés")
+        self.assertIn("BTCUSDT/elan", sc.last_shadow, "des trades fantômes doivent être lancés")
         self.assertFalse(sc.trades, "aucun trade réel tant que le modèle apprend")
 
-        for key, m in sc.models.items():  # modèle entraîné et confiant, en entrée limite
-            m.seen, m.b = CFG["scalp_apprentissage_min"], (5.0 if key.endswith("limite") else -5.0)
+        for key, m in sc.models.items():  # modèle entraîné, confirmé par ses résultats, en entrée limite
+            good = key.startswith("elan/") and key.endswith("limite")
+            m.seen, m.b, m.base_rate = CFG["scalp_apprentissage_min"], (5.0 if good else -5.0), 0.5
+            m.cal_n, m.cal_w = [100.0] * 10, [(90.0 if good else 1.0)] * 10
+            m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)  # contextes déjà vus
             sc.state["remplissage"][key] = 0.9
         t = self._sell_burst(30000)
         self.assertIn("BTCUSDT", sc.trades)
@@ -152,6 +155,53 @@ class ScalperTest(unittest.TestCase):
         self.assertGreater(sc.state["cash"], cash)
         self.assertEqual(sc.state["stats"]["trades"], 1)
         self.assertTrue(os.path.exists(sc.journal_path))
+
+
+    def test_overconfident_model_is_corrected_by_calibration(self):
+        sc = self.sc
+        for m in sc.models.values():  # le modèle brut se croit sûr de lui, mais n'a gagné que 5 % du temps
+            m.seen, m.b, m.base_rate = CFG["scalp_apprentissage_min"], 5.0, 0.05
+            m.cal_n, m.cal_w = [100.0] * 10, [5.0] * 10
+            m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)
+        self._sell_burst(30000)
+        self.assertFalse(sc.trades, "aucun trade quand les résultats réels démentent le modèle")
+
+    def test_quarantine_after_real_losses(self):
+        sc = self.sc
+        b = book()
+        for i in range(5):
+            sim = scalper.SimTrade("short", i * 1000, b, PROFILE, CFG, False, features=[0.0] * len(FEATURES),
+                                   p=0.6, notional=1000.0)
+            sim._close(i * 1000 + 500, sim.entry * 1.002, False, "stop")
+            sc.record("BTCUSDT", sim)
+        self.assertTrue(sc.paused("BTCUSDT", 10000))
+        self.assertFalse(sc.paused("BTCUSDT", 10000 + scalper.QUARANTINE_MS))
+
+    def test_single_instance_lock(self):
+        self.sc.acquire_lock()
+        other = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=self.tmp.name)
+        with self.assertRaises(scalper.AlreadyRunning):
+            other.acquire_lock()
+
+    def test_live_balance_file(self):
+        self.sc.write_live()
+        with open(self.sc.live_path, encoding="utf-8") as f:
+            snap = json.load(f)
+        self.assertEqual(snap["valeur"], CFG["capital_initial"])
+        self.assertIn("Valeur actuelle", scalper.format_balance(snap))
+
+
+class CalibrationTest(unittest.TestCase):
+    def test_calibrated_matches_reality_and_ignores_unknown_contexts(self):
+        rnd = random.Random(0)
+        m = OnlineLogit()
+        for _ in range(3000):
+            x = [rnd.gauss(0, 1) for _ in FEATURES]
+            m.update(x, 1.0 if rnd.random() < 0.1 else 0.0)  # 10 % de gains quoi qu'il arrive
+        p, _ = m.calibrated([2.0] * len(FEATURES))
+        self.assertLess(abs(p - 0.1), 0.08)
+        p_unknown, _ = m.calibrated([50.0] * len(FEATURES))
+        self.assertAlmostEqual(p_unknown, m.base_rate)
 
 
 class FakeSock:

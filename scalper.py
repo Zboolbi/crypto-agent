@@ -23,6 +23,7 @@ Fonctionnement :
 
 import collections
 import csv
+import fcntl
 import json
 import logging
 import math
@@ -43,8 +44,15 @@ SAMPLE_MS = 250       # pas d'échantillonnage du prix
 LONG_MS = 30000       # horizon de la baisse « 30 s » et de la volatilité
 STATUS_S = 30
 TREND_REFRESH_S = 300
-SHADOW_SPACING_MS = 2000  # au plus un groupe de fantômes toutes les 2 s par crypto
-QUARANTINE_MIN = 120      # exemples (réels + fantômes) avant de juger une crypto
+SHADOW_SPACING_MS = 1000  # au plus un groupe de fantômes par seconde, par crypto et par famille
+QUARANTINE_TRADES = 5     # trades réels examinés pour la quarantaine
+QUARANTINE_MS = 3600000   # durée de la quarantaine d'une crypto
+LIVE_FILE_S = 1           # fréquence d'écriture du solde temps réel
+CURVE_S = 10              # fréquence d'enregistrement de la courbe de valeur (tableau de bord)
+
+
+class AlreadyRunning(RuntimeError):
+    pass
 
 log = logging.getLogger("scalper")
 
@@ -123,8 +131,8 @@ class Book:
 # --------------------------------------------------------------------------- #
 
 
-def model_key(profile, maker):
-    return "{}/{}".format(profile["nom"], "limite" if maker else "marche")
+def model_key(family, profile, maker):
+    return "{}/{}/{}".format(family, profile["nom"], "limite" if maker else "marche")
 
 
 class SimTrade:
@@ -132,9 +140,9 @@ class SimTrade:
                  "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
                  "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed")
 
-    def __init__(self, side, t, book, profile, cfg, maker, features=None, p=None, notional=0.0):
+    def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0):
         self.side, self.profile, self.features, self.p, self.notional = side, profile, features, p, notional
-        self.key = model_key(profile, maker)
+        self.key = key or model_key("elan", profile, maker)
         self.maker_bps, self.taker_bps = cfg["frais_maker_pct"] * 100, cfg["frais_pct"] * 100
         self.flow_exit = cfg["scalp_sortie_flux"]
         self.maker_entry = maker
@@ -217,23 +225,31 @@ class SimTrade:
 class Scalper:
     def __init__(self, mode="papier", cfg=None, state_dir=HERE):
         setup_logging()
+        self.state_dir = state_dir
         self.cfg = cfg or T.load_config()
         self.mode = mode
         self.trader = T.Trader(mode, self.cfg)
         self.broker = self.trader.broker
         self.state_path = os.path.join(state_dir, "portefeuille_scalp_{}.json".format(mode))
         self.journal_path = os.path.join(state_dir, "journal_scalp_{}.csv".format(mode))
+        self.curve_path = os.path.join(state_dir, "courbe_scalp_{}.csv".format(mode))
+        self.live_path = os.path.join(state_dir, "etat_scalp_{}.json".format(mode))
         self.state = self._load_state()
         modes = {"limite": [True], "marche": [False]}.get(self.cfg["scalp_entree"], [True, False])
-        self.variants = [(p, m) for p in self.cfg["scalp_profils"] for m in modes]
-        self.models = {model_key(p, m): OnlineLogit.from_dict(self.state["modeles"].get(model_key(p, m)))
-                       for p, m in self.variants}
+        # « elan » : short pendant une chute ; « rebond » : short après une poussée trop rapide.
+        self.families = list(self.cfg["scalp_familles"]) + (["elan_long"] if self.cfg["scalp_long"] else [])
+        self.variants = [(f, p, m) for f in self.families for p in self.cfg["scalp_profils"] for m in modes]
+        self.models = {model_key(f, p, m): OnlineLogit.from_dict(self.state["modeles"].get(model_key(f, p, m)))
+                       for f, p, m in self.variants}
         self.books, self.coins, self.trend, self.funding = {}, {}, {}, {}
         self.shadows = collections.defaultdict(list)
         self.last_shadow = {}
         self.trades = {}   # trades réels en cours (attente ou ouvert), un par contrat
         self.latencies = collections.deque(maxlen=2000)
-        self.msgs = self.reconnects = 0
+        self.msgs = self.reconnects = self.n_shadows = 0
+        self.proc_us = 0.0                     # temps de traitement moyen d'un message
+        self.rate = (time.time(), 0, 0.0)      # (instant, messages cumulés, débit msg/s)
+        self.msg_total = 0
         self.offset_ms = 0.0
         self.equity_cache = self.state["cash"]
         self._stop = threading.Event()
@@ -369,6 +385,7 @@ class Scalper:
                 self._fill_stat(s.key, 0.0)
             else:
                 alive.append(s)
+        self.n_shadows += len(alive) - len(self.shadows[c])
         self.shadows[c] = alive
 
     # -- apprentissage ---------------------------------------------------------------
@@ -387,9 +404,8 @@ class Scalper:
         sym["n"] += 1
         self.state["stats"]["fantomes"] += 1
 
-    def quarantined(self, c):
-        sym = self.state["cryptos"].get(c)
-        return bool(sym and sym["n"] >= QUARANTINE_MIN and sym["edge"] <= self.cfg["scalp_quarantaine_bps"])
+    def paused(self, c, t):
+        return t < self.state["cryptos"].get(c, {}).get("pause_jusqua", 0)
 
     # -- décisions --------------------------------------------------------------------
 
@@ -404,42 +420,47 @@ class Scalper:
         p5 = b.price_ago(t, cfg["scalp_momentum_s"] * 1000)
         if not p5:
             return
-        flow, mom = b.flow(), (b.last / p5 - 1) * 1e4
-        side = None
-        if cfg["autoriser_short"] and flow <= -cfg["scalp_seuil_desequilibre"] and mom <= -cfg["scalp_seuil_momentum_bps"] \
-                and self.trend.get(c, 0.0) <= cfg["scalp_filtre_tendance"]:
-            side = "short"
-        elif cfg["scalp_long"] and flow >= cfg["scalp_seuil_desequilibre"] and mom >= cfg["scalp_seuil_momentum_bps"] \
-                and self.trend.get(c, 0.0) >= cfg["scalp_filtre_tendance"]:
-            side = "long"
-        if not side:
-            return
+        flow, mom, trend = b.flow(), (b.last / p5 - 1) * 1e4, self.trend.get(c, 0.0)
+        seuil = cfg["scalp_seuil_desequilibre"]
+        if cfg["autoriser_short"] and trend <= cfg["scalp_filtre_tendance"]:
+            if "elan" in self.families and flow <= -seuil and mom <= -cfg["scalp_seuil_momentum_bps"]:
+                self.evaluate(c, t, "elan", "short")
+            if "rebond" in self.families and flow >= seuil and mom >= cfg["scalp_seuil_rebond_bps"]:
+                self.evaluate(c, t, "rebond", "short")
+        if "elan_long" in self.families and flow >= seuil and mom >= cfg["scalp_seuil_momentum_bps"] \
+                and trend >= cfg["scalp_filtre_tendance"]:
+            self.evaluate(c, t, "elan_long", "long")
+
+    def evaluate(self, c, t, family, side):
+        cfg, b = self.cfg, self.books[c]
         x = self.features(c, t, side)
 
         # Trades fantômes : l'agent apprend de chaque signal, même ceux qu'il ne prend pas.
-        if t - self.last_shadow.get(c, 0) >= SHADOW_SPACING_MS and \
-                sum(len(v) for v in self.shadows.values()) < cfg["scalp_fantomes_max"]:
-            self.last_shadow[c] = t
-            for prof, maker in self.variants:
-                self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, features=x))
+        sk = c + "/" + family
+        if t - self.last_shadow.get(sk, 0) >= SHADOW_SPACING_MS and \
+                self.n_shadows < cfg["scalp_fantomes_max"]:
+            self.last_shadow[sk] = t
+            for fam, prof, maker in self.variants:
+                if fam == family:
+                    self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, model_key(fam, prof, maker),
+                                                    features=x))
+                    self.n_shadows += 1
 
-        if c in self.trades or self.quarantined(c) or not self.ready() or not self.can_open():
-            return
-        if t < self.state["cryptos"].get(c, {}).get("pause_jusqua", 0):
+        if c in self.trades or not self.can_open() or self.paused(c, t):
             return
         best = None
-        for prof, maker in self.variants:
-            key = model_key(prof, maker)
-            if not self.ready(key):
+        for fam, prof, maker in self.variants:
+            key = model_key(fam, prof, maker)
+            if fam != family or not self.ready(key):
                 continue
-            p = self.models[key].predict(x)
+            p, _ = self.models[key].calibrated(x)  # probabilité corrigée par les résultats réels
             ev, win, loss = self.expected(prof, p, maker)
             score = ev * (self.fill_rate(key) if maker else 1.0)  # un ordre non exécuté ne rapporte rien
             if best is None or score > best[0]:
-                best = (score, prof, maker, p, win, loss, ev)
+                best = (score, prof, maker, key, p, win, loss, ev)
         if best and best[0] >= cfg["scalp_ev_min_bps"]:
-            _, prof, maker, p, win, loss, ev = best
-            self.open(c, t, side, prof, maker, x, p, win, loss, ev)
+            _, prof, maker, key, p, win, loss, ev = best
+            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev)
 
     def can_open(self):
         st, cfg = self.state, self.cfg
@@ -458,14 +479,14 @@ class Scalper:
     def exposure(self):
         return sum(s.notional for s in self.trades.values())
 
-    def open(self, c, t, side, prof, maker, x, p, win, loss, ev):
+    def open(self, c, t, side, prof, maker, key, x, p, win, loss, ev):
         cfg = self.cfg
         eq = self.equity_cache
         pct = self.size_pct(p, win, loss)
         notional = min(eq * pct / 100, eq * cfg["levier_max"] - self.exposure())
         if notional < 10:
             return
-        sim = SimTrade(side, t, self.books[c], prof, cfg, maker, features=x, p=p, notional=notional)
+        sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional)
         self.state["stats"]["ordres"] += 1
         if self.mode != "papier" and not self._send_entry(c, sim):
             return
@@ -473,7 +494,7 @@ class Scalper:
         log.info("{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
             red("▼ SHORT") if side == "short" else green("▲ LONG"), self.coins[c]["base"],
             "limite" if sim.maker_entry else "marché", fmt_price(sim.limit or sim.entry, "usd"),
-            prof["nom"], p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
+            key, p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
 
     def _step_real(self, c, sim, t, step):
         before = sim.state
@@ -503,7 +524,13 @@ class Scalper:
         st["serie_pertes"] = 0 if pnl > 0 else st["serie_pertes"] + 1
         self.learn(c, sim)
         sym = st["cryptos"].setdefault(c, {"edge": 0.0, "n": 0})
+        sym["reel"] = (sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):] + [net_bps]
         sym["pause_jusqua"] = sim.closed + self.cfg["scalp_pause_s"] * 1000
+        if len(sym["reel"]) >= QUARANTINE_TRADES and \
+                sum(sym["reel"]) / len(sym["reel"]) <= self.cfg["scalp_quarantaine_bps"]:
+            sym["pause_jusqua"], sym["reel"] = sim.closed + QUARANTINE_MS, []
+            log.info(yellow("  {} en quarantaine 1 h : ses {} derniers trades réels perdent en moyenne".format(
+                self.coins[c]["base"], QUARANTINE_TRADES)))
         duration = (sim.closed - sim.opened) / 1000
         self.journal(crypto=self.coins[c]["base"], sens=sim.side, profil=sim.key, proba=round(sim.p, 3),
                      entree=sim.entry, sortie=sim.exit, notionnel=round(sim.notional, 2), duree_s=round(duration, 2),
@@ -637,6 +664,64 @@ class Scalper:
                     del self.trades[c]
                     self.record(c, sim)
 
+    def snapshot(self):
+        st, s = self.state, self.state["stats"]
+        eq = self.equity() if self.mode == "papier" else self.equity_cache
+        positions = []
+        for c, sim in self.trades.items():
+            b = self.books.get(c)
+            row = {"crypto": self.coins[c]["base"], "variante": sim.key, "etat": sim.state,
+                   "notionnel": round(sim.notional, 2)}
+            if sim.state == "ouvert" and b and b.bid:
+                now_price = b.ask if sim.side == "short" else b.bid
+                row.update(entree=sim.entry, actuel=now_price,
+                           pnl=round(sim.notional * (sim.gross_bps(now_price) - sim.fee_bps) / 1e4, 2))
+            positions.append(row)
+        hours = max((time.time() - s["debut"]) / 3600, 1 / 60)
+        now = time.time()
+        t0, n0, rate = self.rate
+        if now - t0 >= 5:
+            rate = (self.msg_total - n0) / (now - t0)
+            self.rate = (now, self.msg_total, rate)
+        lat = sorted(self.latencies)
+        return {"maj": now, "mode": self.mode,
+                "flux_msg_s": round(rate, 1), "retard_ms": round(lat[len(lat) // 2]) if lat else None,
+                "reconnexions": self.reconnects, "traitement_us": round(self.proc_us, 1),
+                "contrats": len(self.coins), "fantomes_actifs": self.n_shadows,
+                "pertes_de_suite": st["serie_pertes"], "arret": st["halted"] or st["halted_day"] == str(date.today()), "capital_initial": self.cfg["capital_initial"],
+                "valeur": round(eq, 2), "realise": round(s["pnl"], 2), "latent": round(eq - st["cash"], 2),
+                "trades": s["trades"], "gagnants": s["gagnants"], "frais": round(s["frais"], 2),
+                "trades_par_heure": round(s["trades"] / hours, 1), "debut": s["debut"],
+                "apprentissage": self.ready(), "fantomes": s["fantomes"], "positions": positions}
+
+    def append_curve(self, snap):
+        new = not os.path.exists(self.curve_path)
+        with open(self.curve_path, "a", encoding="utf-8") as f:
+            if new:
+                f.write("t,valeur,realise,latent,trades\n")
+            f.write("{:.0f},{},{},{},{}\n".format(snap["maj"], snap["valeur"], snap["realise"], snap["latent"],
+                                                 snap["trades"]))
+
+    def write_live(self):
+        tmp = self.live_path + ".tmp"
+        snap = self.snapshot()
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snap, f)
+        os.replace(tmp, self.live_path)
+        return snap
+
+    def _stdin_loop(self):
+        """En terminal : Entrée (ou « s ») affiche le solde, « b » le bilan complet."""
+        while not self._stop.is_set():
+            try:
+                cmd = input().strip().lower()
+            except (EOFError, OSError):
+                return
+            if cmd in ("", "s", "solde"):
+                print(format_balance(self.snapshot()))
+            elif cmd in ("b", "bilan"):
+                self.show()
+
     def status(self):
         s = self.state["stats"]
         hours = max((time.time() - s["debut"]) / 3600, 1 / 60)
@@ -645,12 +730,11 @@ class Scalper:
         eq = self.equity_cache
         seen = max(m.seen for m in self.models.values())
         learning = "modèle prêt" if self.ready() else "apprentissage {}/{}".format(seen, self.cfg["scalp_apprentissage_min"])
-        acc = sum(m.accuracy for m in self.models.values()) / len(self.models)
         log.info(dim("── valeur {} ({:+.2f}%) · {} trades ({:.0f}/h) · gagnants {:.0f}% · net {:+.2f} $ · "
-                     "ordres exécutés {}/{} · {} · {} fantômes, précision {:.0%} · flux {:.0f} msg/s, retard {:.0f} ms"
+                     "ordres exécutés {}/{} · {} · {} fantômes appris · flux {:.0f} msg/s, retard {:.0f} ms"
                      .format(fmt_price(eq, "usd"), (eq / self.cfg["capital_initial"] - 1) * 100, s["trades"],
                              s["trades"] / hours, s["gagnants"] / s["trades"] * 100 if s["trades"] else 0, s["pnl"],
-                             s["executes"], s["ordres"], learning, s["fantomes"], acc, self.msgs / STATUS_S, med)))
+                             s["executes"], s["ordres"], learning, s["fantomes"], self.msgs / STATUS_S, med)))
         self.msgs = 0
         sys.stdout.flush()
 
@@ -672,8 +756,18 @@ class Scalper:
                 time.sleep(delay)
                 delay = min(delay * 2, 30)
 
+    def acquire_lock(self):
+        self._lock = open(os.path.join(self.state_dir, ".scalper_{}.lock".format(self.mode)), "w")
+        try:
+            fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self._lock.close()
+            raise AlreadyRunning("un agent de scalping {} tourne déjà (service ou autre terminal)".format(
+                self.mode)) from None
+
     def run(self):
         cfg = self.cfg
+        self.acquire_lock()
         self.select_universe()
         self.refresh_trend()
         self.offset_ms = binance_clock_offset_ms()
@@ -692,7 +786,10 @@ class Scalper:
         q = queue.Queue(maxsize=200000)
         for name, url in binance_stream_urls(contracts).items():
             threading.Thread(target=self._reader, args=(name, url, q), daemon=True).start()
-        last_status = last_poll = time.time()
+        if sys.stdin.isatty():
+            log.info(dim("Appuyez sur Entrée pour voir le solde en temps réel, « b » + Entrée pour le bilan."))
+            threading.Thread(target=self._stdin_loop, daemon=True).start()
+        last_status = last_poll = last_live = last_curve = time.time()
         try:
             while True:
                 try:
@@ -702,18 +799,27 @@ class Scalper:
                 if isinstance(item, tuple):
                     log.info(yellow(item[1]))
                     continue
+                started = time.perf_counter()
                 d = json.loads(item).get("data") or {}
                 c = d.get("s")
                 self.msgs += 1
+                self.msg_total += 1
                 if d.get("e") == "aggTrade":
                     self.latencies.append(time.time() * 1000 + self.offset_ms - d["T"])
                     self.on_trade(c, d["T"], float(d["p"]), float(d["q"]), d["m"])
                 elif d.get("e") == "depthUpdate":
                     self.on_depth(c, d["T"], d["b"], d["a"])
+                self.proc_us += 0.001 * ((time.perf_counter() - started) * 1e6 - self.proc_us)
                 now = time.time()
                 if self.mode != "papier" and now - last_poll >= 1:
                     self._poll_live(now * 1000 + self.offset_ms)
                     last_poll = now
+                if now - last_live >= LIVE_FILE_S:
+                    snap = self.write_live()
+                    last_live = now
+                    if now - last_curve >= CURVE_S:
+                        self.append_curve(snap)
+                        last_curve = now
                 if now - last_status >= STATUS_S:
                     self.risk_guard(now * 1000 + self.offset_ms)
                     self.status()
@@ -735,10 +841,13 @@ class Scalper:
             s["executes"], s["ordres"], s["fantomes"]))
         print(bold("\n  Ce que l'agent a appris"))
         for key, m in self.models.items():
+            if m.seen < 50:
+                continue
             good, bad = m.explain()
             fill = " · ordres exécutés {:.0%}".format(self.fill_rate(key)) if key.endswith("limite") else ""
-            print("  {} ({} exemples, {:.0%} gagnants, précision {:.0%}{}) :".format(
-                key, m.seen, m.base_rate, m.accuracy, fill))
+            said, real = m.calibration()
+            cal = " · annoncé {:.0%} → réel {:.0%}".format(said, real) if said is not None else ""
+            print("  {} ({} exemples, {:.0%} gagnants{}{}) :".format(key, m.seen, m.base_rate, fill, cal))
             if good:
                 print("    favorable : " + ", ".join("{} ({:+.2f})".format(n, w) for n, w in good))
             if bad:
@@ -748,9 +857,10 @@ class Scalper:
             fmt = lambda kv: "{} {:+.1f} pb".format(kv[0].replace("USDT", ""), kv[1]["edge"])  # noqa: E731
             print("  Cryptos les plus piégeuses : " + ", ".join(fmt(kv) for kv in syms[:4]))
             print("  Cryptos les plus favorables : " + ", ".join(fmt(kv) for kv in reversed(syms[-4:])))
-            q = [c.replace("USDT", "") for c, _ in syms if self.quarantined(c)]
-            if q:
-                print(yellow("  En quarantaine (plus de trades réels) : " + ", ".join(q)))
+        now = time.time() * 1000
+        q = [c.replace("USDT", "") for c, v in st["cryptos"].items() if v.get("pause_jusqua", 0) - now > 60000]
+        if q:
+            print(yellow("  En quarantaine : " + ", ".join(q)))
         if os.path.exists(self.journal_path):
             with open(self.journal_path, encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))[-10:]
@@ -763,13 +873,67 @@ class Scalper:
                     (green if v >= 0 else red)("{:+.2f}$".format(v)), dim(r["raison"])))
 
 
+def format_balance(snap):
+    cap = snap["capital_initial"]
+    total = snap["valeur"] - cap
+    rate = snap["gagnants"] / snap["trades"] * 100 if snap["trades"] else 0
+    lines = [
+        bold("  Solde [{}] · {}".format(snap["mode"].upper(), datetime.fromtimestamp(snap["maj"]).strftime("%H:%M:%S"))),
+        "  Valeur actuelle : {}  ({} depuis le lancement, départ {})".format(
+            bold(fmt_price(snap["valeur"], "usd")),
+            (green if total >= 0 else red)("{:+,.2f} $ / {:+.2f}%".format(total, total / cap * 100).replace(",", " ")),
+            fmt_price(cap, "usd")),
+        "  Réalisé {:+.2f} $ · en cours {:+.2f} $ · frais payés {:.2f} $".format(
+            snap["realise"], snap["latent"], snap["frais"]),
+        "  {} trades ({}/h) · gagnants {:.0f}% · {} exemples appris{}".format(
+            snap["trades"], snap["trades_par_heure"], rate, snap["fantomes"],
+            "" if snap["apprentissage"] else " · apprentissage en cours"),
+    ]
+    for p in snap["positions"]:
+        if p.get("pnl") is not None:
+            lines.append("    {} {} {} → {} : {}".format(p["crypto"], p["variante"], fmt_price(p["entree"], "usd"),
+                                                      fmt_price(p["actuel"], "usd"),
+                                                      (green if p["pnl"] >= 0 else red)("{:+.2f} $".format(p["pnl"]))))
+        else:
+            lines.append("    {} {} : ordre limite en attente".format(p["crypto"], p["variante"]))
+    return "\n".join(lines)
+
+
+def show_balance(path, follow=False):
+    while True:
+        try:
+            with open(path, encoding="utf-8") as f:
+                snap = json.load(f)
+        except (OSError, ValueError):
+            print("Aucun solde disponible : l'agent n'a pas encore tourné avec cette version.")
+            return
+        out = format_balance(snap)
+        age = time.time() - snap["maj"]
+        if age > 15:
+            out += "\n" + yellow("  ⚠ Agent arrêté : dernière mise à jour il y a {:.0f} min.".format(age / 60))
+        if follow:
+            sys.stdout.write("\033[H\033[J" + out + "\n" + dim("  Ctrl+C pour quitter") + "\n")
+            sys.stdout.flush()
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                return
+        else:
+            print(out)
+            return
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Scalping temps réel qui apprend de ses erreurs.")
     parser.add_argument("--mode", choices=["papier", "testnet", "reel"], default="papier")
     parser.add_argument("--je-confirme-le-risque", action="store_true")
-    parser.add_argument("cmd", nargs="?", default="lancer", choices=["lancer", "bilan", "reset"])
+    parser.add_argument("cmd", nargs="?", default="lancer", choices=["lancer", "solde", "bilan", "reset"])
+    parser.add_argument("--suivre", action="store_true", help="solde rafraîchi chaque seconde")
     args = parser.parse_args()
+    if args.cmd == "solde":
+        show_balance(os.path.join(HERE, "etat_scalp_{}.json".format(args.mode)), args.suivre)
+        return
     T.load_env()
     if args.mode == "reel" and args.cmd == "lancer":
         T.confirm_real(args.je_confirme_le_risque)
@@ -777,13 +941,21 @@ def main():
     if args.cmd == "bilan":
         sc.show()
     elif args.cmd == "reset":
-        for p in (sc.state_path, sc.journal_path):
+        try:
+            sc.acquire_lock()
+        except AlreadyRunning as e:
+            print("Remise à zéro impossible : {}.".format(e))
+            return
+        for p in (sc.state_path, sc.journal_path, sc.live_path, sc.curve_path):
             if os.path.exists(p):
                 os.remove(p)
         print("Portefeuille et apprentissage du scalping remis à zéro.")
     else:
         try:
             sc.run()
+        except AlreadyRunning as e:
+            print(red("Impossible de lancer : {}. Voir le solde : python3 scalper.py solde".format(e)))
+            sys.exit(1)
         except KeyboardInterrupt:
             print("\n  Scalping arrêté.")
             sc.show()

@@ -181,3 +181,41 @@ python3 -m unittest discover -s tests   # tests
 - La latence est de 150 à 300 ms entre Binance et ce Mac. Le trading à la milliseconde demande un serveur hébergé à côté de l'exchange.
 - Au premier apprentissage (5 min), ces signaux ne gagnaient que 13 à 26 % du temps après frais : l'agent n'a donc pris aucun trade réel. C'est voulu, il ne trade que s'il a une espérance positive.
 - En mode testnet ou réel, le suivi des ordres limite se fait en interrogeant l'exchange chaque seconde. Ce chemin n'a encore été testé ni sur un compte ni avec un faux exchange : validez-le sur le testnet avant tout.
+
+---
+
+# Tableau de bord et outils
+
+## Tableau de bord temps réel (style Grafana)
+
+**http://localhost:8050**, installé et lancé automatiquement par `./installer_service.sh`. Il se rafraîchit chaque seconde :
+- valeur du portefeuille, gain ou perte depuis le lancement, réalisé, en cours, frais ;
+- nombre de trades par heure, taux de gain, espérance par trade nette de frais, calibrage du modèle (probabilité annoncée face au taux réel) ;
+- courbe de valeur, avec un choix de période : 15 min, 1 h, 6 h, 24 h ou tout ;
+- résultat de chaque trade, raisons de sortie, cryptos favorables et piégeuses (⏸ = quarantaine) ;
+- positions ouvertes, derniers trades et ce que chaque modèle a appris ;
+- santé de l'agent : débit du flux, retard Binance → Mac, temps de traitement, reconnexions, coupe-circuit.
+
+À lancer à la main si besoin : `.venv/bin/python dashboard.py`. Il n'écoute que sur ce Mac.
+
+## Solde à tout moment
+
+```bash
+.venv/bin/python scalper.py solde            # instantané
+.venv/bin/python scalper.py solde --suivre   # rafraîchi chaque seconde
+```
+
+Si l'agent tourne au premier plan dans un terminal, appuyer sur **Entrée** affiche le solde, et **b** puis Entrée le bilan complet. Un verrou empêche de lancer deux agents à la fois.
+
+## Environnement Python
+
+Python 3.9, celui de macOS, n'est plus maintenu depuis octobre 2025, et ccxt exige désormais Python 3.10 ou plus récent. Le projet utilise donc **Python 3.12** dans `.venv`, installé avec [uv](https://docs.astral.sh/uv/) et sans droits administrateur. C'est aussi environ 50 % plus rapide sur le traitement du flux.
+
+```bash
+~/.local/share/uv-bootstrap/bin/uv venv --python 3.12 .venv
+~/.local/share/uv-bootstrap/bin/uv pip install --python .venv/bin/python -r requirements-dev.txt
+.venv/bin/python -m unittest discover -s tests   # 20 tests
+.venv/bin/ruff check --exclude .venv .
+```
+
+Le mode papier n'a besoin d'aucune dépendance. `ccxt` sert uniquement aux modes testnet et réel.

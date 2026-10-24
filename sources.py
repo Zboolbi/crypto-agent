@@ -405,8 +405,17 @@ def binance_stream_urls(contracts):
             "carnet": base.format("public") + "/".join(n + "@depth5@100ms" for n in names)}
 
 
-def binance_clock_offset_ms():
-    """Décalage horloge serveur − horloge locale, pour mesurer la latence réelle du flux."""
-    t0 = time.time() * 1000
-    server = http_json(BinanceFutures.BASE + "/time")["serverTime"]
-    return server - (t0 + time.time() * 1000) / 2
+def binance_clock_offset_ms(samples=5):
+    """Décalage horloge serveur − horloge locale, pour mesurer la latence réelle du flux.
+
+    Comme NTP : plusieurs mesures, on garde celle dont l'aller-retour est le plus court
+    (la première, qui inclut l'établissement de la connexion, est souvent faussée).
+    """
+    best = None
+    for _ in range(samples):
+        t0 = time.time() * 1000
+        server = http_json(BinanceFutures.BASE + "/time")["serverTime"]
+        t1 = time.time() * 1000
+        if best is None or t1 - t0 < best[0]:
+            best = (t1 - t0, server - (t0 + t1) / 2)
+    return best[1]

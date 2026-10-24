@@ -8,3 +8,8 @@ config_trading.json
 __pycache__/
 .ruff_cache/
 .DS_Store
+etat_*.json
+etat_*.json.tmp
+.scalper_*.lock
+courbe_*.csv
+.venv/

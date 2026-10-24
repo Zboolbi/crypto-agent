@@ -74,10 +74,12 @@ DEFAULT_CONFIG = {
     "exchange": "binanceusdm",
     # -- scalping (scalper.py) --
     "frais_maker_pct": 0.02,           # frais des ordres limite (frais_pct = ordres au marché)
-    "scalp_cryptos": 20,               # contrats suivis en temps réel (les plus liquides)
+    "scalp_cryptos": 40,               # contrats suivis en temps réel (les plus liquides)
+    "scalp_familles": ["elan", "rebond"],  # short pendant une chute / short après une poussée trop rapide
     "scalp_entree": "auto",            # « auto » (le modèle choisit), « limite » (maker) ou « marche »
     "scalp_entree_delai_s": 3,         # ordre limite annulé s'il n'est pas exécuté à temps
     "scalp_profils": [                 # chaque signal est évalué sur ces profils, le meilleur est retenu
+        {"nom": "precis", "objectif_bps": 8, "stop_bps": 20, "duree_s": 60},
         {"nom": "eclair", "objectif_bps": 10, "stop_bps": 8, "duree_s": 20},
         {"nom": "rapide", "objectif_bps": 20, "stop_bps": 15, "duree_s": 60},
         {"nom": "large", "objectif_bps": 35, "stop_bps": 25, "duree_s": 180},
@@ -86,6 +88,7 @@ DEFAULT_CONFIG = {
     "scalp_momentum_s": 5,
     "scalp_seuil_desequilibre": 0.3,   # pré-filtre large : c'est le modèle qui décide ensuite
     "scalp_seuil_momentum_bps": 2,
+    "scalp_seuil_rebond_bps": 4,       # hausse minimale sur 5 s pour un short « rebond »
     "scalp_volume_min_usd": 20000,
     "scalp_spread_max_bps": 3,
     "scalp_sortie_flux": 0.8,          # sortie anticipée si les achats dominent nettement
@@ -94,8 +97,8 @@ DEFAULT_CONFIG = {
     "scalp_taille_max_pct": 60,
     "scalp_ev_min_bps": 1.0,           # gain espéré minimal après frais pour un trade réel
     "scalp_apprentissage_min": 200,    # trades fantômes par profil avant le premier trade réel
-    "scalp_quarantaine_bps": -8,       # crypto écartée si ses trades perdent en moyenne plus que ça
-    "scalp_fantomes_max": 600,
+    "scalp_quarantaine_bps": -10,      # pause 1 h si les 5 derniers trades réels perdent plus en moyenne
+    "scalp_fantomes_max": 3000,
     "scalp_positions_max": 5,
     "scalp_long": False,               # short uniquement
     "scalp_filtre_tendance": 20,       # pas de short si le score 15 min dépasse ce seuil
@@ -1223,9 +1226,10 @@ def service(mode):
                     except KeyboardInterrupt:
                         raise
                     except Exception as e:
-                        print(red("  Scalping interrompu : {} — redémarrage dans 5 s.".format(e)))
+                        busy = type(e).__name__ == "AlreadyRunning"
+                        print(red("  Scalping interrompu : {} — nouvel essai dans {} s.".format(e, 60 if busy else 5)))
                         sys.stdout.flush()
-                        time.sleep(5)
+                        time.sleep(60 if busy else 5)
                     continue
                 if trader is None:
                     trader = Trader(mode)

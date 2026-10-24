@@ -1,21 +1,21 @@
 #!/bin/bash
-# Installe l'agent comme service macOS (launchd) : il démarre à l'ouverture de session,
-# redémarre seul s'il s'arrête et empêche la mise en veille pendant qu'il tourne.
+# Installe l'agent et son tableau de bord comme services macOS (launchd) : ils démarrent à
+# l'ouverture de session, redémarrent seuls s'ils s'arrêtent, et l'agent empêche la mise en veille.
 # Usage : ./installer_service.sh [papier|testnet|reel]
 set -e
 MODE="${1:-papier}"
 case "$MODE" in papier|testnet|reel) ;; *) echo "Usage : $0 [papier|testnet|reel]"; exit 1 ;; esac
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-PY="$(command -v python3)"
+if [ -x "$DIR/.venv/bin/python" ]; then PY="$DIR/.venv/bin/python"; else PY="$(command -v python3)"; fi
+AGENTS="$HOME/Library/LaunchAgents"
 LABEL="com.cryptoagent.$MODE"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$DIR/logs/agent_$MODE.log"
+DASH="com.cryptoagent.dashboard"
 EXTRA=""
 
 if [ "$MODE" != "papier" ]; then
-  [ -f "$DIR/.env" ] || { echo "Clés absentes : lancez d'abord « python3 trader.py cles »."; exit 1; }
-  "$PY" -c "import ccxt" 2>/dev/null || { echo "Installez d'abord ccxt : pip3 install ccxt"; exit 1; }
+  [ -f "$DIR/.env" ] || { echo "Clés absentes : lancez d'abord « $PY trader.py cles »."; exit 1; }
+  "$PY" -c "import ccxt" 2>/dev/null || { echo "ccxt manquant : $PY -m pip install -r requirements.txt"; exit 1; }
 fi
 if [ "$MODE" = "reel" ]; then
   echo "⚠  MODE RÉEL : l'agent va trader seul, en permanence, avec votre argent (short et levier compris)."
@@ -26,40 +26,44 @@ if [ "$MODE" = "reel" ]; then
 fi
 case "$DIR" in
   "$HOME/Desktop"*|"$HOME/Documents"*|"$HOME/Downloads"*)
-    echo "ℹ  Le dossier est dans un emplacement protégé par macOS. Si le journal affiche"
-    echo "   « Operation not permitted », déplacez le dossier (ex. ~/crypto-agent) puis réinstallez,"
-    echo "   ou accordez « Accès complet au disque » à $PY (Réglages Système > Confidentialité)." ;;
+    echo "ℹ  Dossier protégé par macOS : si le journal affiche « Operation not permitted »,"
+    echo "   déplacez-le (ex. ~/crypto-agent) ou accordez l'accès complet au disque à $PY." ;;
 esac
 
-mkdir -p "$DIR/logs" "$HOME/Library/LaunchAgents"
-cat > "$PLIST" <<EOF
+mkdir -p "$DIR/logs" "$AGENTS"
+plist() {  # plist <label> <journal> <arguments XML...>
+  local label="$1" log="$2"; shift 2
+  cat > "$AGENTS/$label.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>$LABEL</string>
+  <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/caffeinate</string><string>-i</string>
-    <string>$PY</string><string>$DIR/trader.py</string>
-    <string>--mode</string><string>$MODE</string>$EXTRA
-    <string>service</string>
-  </array>
+  <array>$*</array>
   <key>WorkingDirectory</key><string>$DIR</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>ThrottleInterval</key><integer>60</integer>
-  <key>StandardOutPath</key><string>$LOG</string>
-  <key>StandardErrorPath</key><string>$LOG</string>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>$log</string>
+  <key>StandardErrorPath</key><string>$log</string>
   <key>EnvironmentVariables</key>
   <dict><key>PYTHONUNBUFFERED</key><string>1</string></dict>
 </dict>
 </plist>
 EOF
+  launchctl unload "$AGENTS/$label.plist" 2>/dev/null || true
+  launchctl load -w "$AGENTS/$label.plist"
+}
 
-launchctl unload "$PLIST" 2>/dev/null || true
-launchctl load -w "$PLIST"
-echo "✓ Service $LABEL installé et démarré."
-echo "  Suivre l'activité : tail -f \"$LOG\""
-echo "  Portefeuille      : python3 trader.py --mode $MODE portefeuille"
+plist "$LABEL" "$DIR/logs/agent_$MODE.log" \
+  "<string>/usr/bin/caffeinate</string><string>-i</string><string>$PY</string><string>$DIR/trader.py</string>" \
+  "<string>--mode</string><string>$MODE</string>$EXTRA<string>service</string>"
+plist "$DASH" "$DIR/logs/dashboard.log" \
+  "<string>$PY</string><string>$DIR/dashboard.py</string><string>--mode</string><string>$MODE</string>"
+
+echo "✓ Agent $LABEL et tableau de bord installés et démarrés (Python : $PY)."
+echo "  Tableau de bord   : http://localhost:8050"
+echo "  Solde en direct   : $PY scalper.py solde --suivre"
+echo "  Journal           : tail -f \"$DIR/logs/agent_$MODE.log\""
 echo "  Arrêter           : ./desinstaller_service.sh $MODE"
