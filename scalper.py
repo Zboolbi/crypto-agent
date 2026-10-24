@@ -258,6 +258,7 @@ class Scalper:
         self.offset_ms = 0.0
         self.equity_cache = self.state["cash"]
         self.explore_times = collections.deque()  # instants des trades d'exploration (dernière heure)
+        self.last_explore = {}                    # dernière exploration par crypto
         self.rng = random.Random()
         self._stop = threading.Event()
 
@@ -307,9 +308,29 @@ class Scalper:
     # -- univers, tendance, financement ------------------------------------------
 
     def select_universe(self):
-        self.trader.refresh(full=True)
-        coins = sorted(self.trader.universe(), key=lambda c: -(c.get("total_volume") or 0))
-        self.coins = {c["contract"]: c for c in coins[:self.cfg["scalp_cryptos"]]}
+        """Tous les contrats perpétuels USDT assez échangés, des plus gros (BTC, ETH, XRP) aux plus petits."""
+        cfg, md = self.cfg, self.trader.md
+        volumes = md.volumes_24h()
+        prices = {k: v["price"] for k, v in md.tickers().items()}
+        rows = []
+        for token, info in md.contracts().items():
+            sym = token.lower()
+            if sym in T.EXCLUDED_SYMBOLS or sym in cfg["exclure"] or sym.startswith("usd") or sym.endswith("usd"):
+                continue  # stablecoins et jetons adossés : pas de mouvement propre à trader
+            vol, price = volumes.get(info["contract"], 0.0), prices.get(info["contract"])
+            if price and info.get("tick", 0) / price * 1e4 > cfg["scalp_pas_max_bps"]:
+                continue  # pas de prix trop grossier pour viser quelques points de base
+            if vol >= cfg["scalp_volume_24h_min_usd"]:
+                rows.append((vol, token, info))
+        rows.sort(key=lambda r: -r[0])
+        if cfg["scalp_cryptos"]:
+            rows = rows[:cfg["scalp_cryptos"]]
+        self.coins = {}
+        for vol, token, info in rows:
+            coin = {"id": info["contract"], "symbol": token.lower(), "name": token, "base": info["base"],
+                    "contract": info["contract"], "mult": info["mult"], "total_volume": vol}
+            if self.broker.available(coin):
+                self.coins[info["contract"]] = coin
         self.books = {c: self.books.get(c) or Book() for c in self.coins}
 
     def refresh_trend(self):
@@ -447,24 +468,30 @@ class Scalper:
     def evaluate(self, c, t, family, side):
         cfg, b = self.cfg, self.books[c]
         x = self.features(c, t, side)
+        # Le stop doit laisser de la marge au-delà de l'écart achat/vente : sinon, vendre au meilleur
+        # acheteur place déjà le prix de rachat contre le stop, et le trade est perdu dès l'entrée.
+        spread = (b.ask - b.bid) / ((b.ask + b.bid) / 2) * 1e4
+        variants = [v for v in self.variants
+                    if v[0] == family and v[1]["stop_bps"] >= cfg["scalp_stop_min_ecarts"] * spread]
+        if not variants:
+            return
 
         # Trades fantômes : l'agent apprend de chaque signal, même ceux qu'il ne prend pas.
         sk = c + "/" + family
         if t - self.last_shadow.get(sk, 0) >= SHADOW_SPACING_MS and \
                 self.n_shadows < cfg["scalp_fantomes_max"]:
             self.last_shadow[sk] = t
-            for fam, prof, maker in self.variants:
-                if fam == family:
-                    self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, model_key(fam, prof, maker),
-                                                    features=x))
-                    self.n_shadows += 1
+            for fam, prof, maker in variants:
+                self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, model_key(fam, prof, maker),
+                                                features=x))
+                self.n_shadows += 1
 
         if c in self.trades or not self.can_open() or self.paused(c, t):
             return
         best = None
-        for fam, prof, maker in self.variants:
+        for fam, prof, maker in variants:
             key = model_key(fam, prof, maker)
-            if fam != family or not self.ready(key):
+            if not self.ready(key):
                 continue
             p, _ = self.models[key].calibrated(x)  # probabilité corrigée par les résultats réels
             ev, win, loss = self.expected(prof, p, maker)
@@ -474,19 +501,23 @@ class Scalper:
         if best and best[0] >= cfg["scalp_ev_min_bps"]:
             _, prof, maker, key, p, win, loss, ev = best
             self.open(c, t, side, prof, maker, key, x, p, win, loss, ev)
-        elif self.can_explore(t):
+        elif self.can_explore(t, c):
             # Exploration : petit trade réel sur une variante tirée au hasard, pour apprendre en tradant.
-            fam, prof, maker = self.rng.choice([v for v in self.variants if v[0] == family])
+            fam, prof, maker = self.rng.choice(variants)
             key = model_key(fam, prof, maker)
             m = self.models[key]
             p = m.calibrated(x)[0] if m.seen >= 50 else m.base_rate
             ev, win, loss = self.expected(prof, p, maker)
             self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True)
 
-    def can_explore(self, t):
+    def can_explore(self, t, c=None):
         cfg = self.cfg
         if not cfg["scalp_exploration"] or (self.mode != "papier" and not cfg["scalp_exploration_reel"]):
             return False
+        if c and t - self.last_explore.get(c, -1e18) < cfg["scalp_exploration_espacement_s"] * 1000:
+            return False  # pas deux explorations de suite sur la même crypto
+        if not cfg["scalp_exploration_par_heure"]:
+            return True   # 0 = pas de plafond horaire
         while self.explore_times and self.explore_times[0] < t - 3600000:
             self.explore_times.popleft()
         spacing = 3600000 / max(1, cfg["scalp_exploration_par_heure"])  # réparti sur l'heure, pas en rafale
@@ -498,7 +529,7 @@ class Scalper:
         st, cfg = self.state, self.cfg
         if st["halted"] or st["halted_day"] == str(date.today()):
             return False
-        return len(self.trades) < cfg["scalp_positions_max"]
+        return not cfg["scalp_positions_max"] or len(self.trades) < cfg["scalp_positions_max"]
 
     def size_pct(self, p, win, loss):
         """Taille selon la confiance (Kelly fractionné), réduite après une série de pertes."""
@@ -526,6 +557,7 @@ class Scalper:
         self.trades[c] = sim
         if explore:
             self.explore_times.append(t)
+            self.last_explore[c] = t
         log.info("{}{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
             cyan("[exploration] ") if explore else "", red("▼ SHORT") if side == "short" else green("▲ LONG"),
             self.coins[c]["base"],

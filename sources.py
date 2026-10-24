@@ -144,8 +144,14 @@ class BinanceFutures:
                 token, mult = _split_base(s["baseAsset"])
                 # On garde le contrat le plus simple (multiplicateur 1) s'il en existe plusieurs.
                 if token not in out or mult < out[token]["mult"]:
-                    out[token] = {"contract": s["symbol"], "base": s["baseAsset"], "mult": mult}
+                    tick = next((float(f["tickSize"]) for f in s.get("filters", [])
+                                 if f.get("filterType") == "PRICE_FILTER"), 0.0)
+                    out[token] = {"contract": s["symbol"], "base": s["baseAsset"], "mult": mult, "tick": tick}
         return out
+
+    def volumes_24h(self):
+        """{contrat: volume échangé sur 24 h, en $}"""
+        return {d["symbol"]: float(d["quoteVolume"]) for d in http_json(self.BASE + "/ticker/24hr")}
 
     def tickers(self):
         """{contrat: {'price': prix mark, 'funding': taux de financement par période}}"""
@@ -177,10 +183,15 @@ class BybitFutures:
                         and s.get("status") == "Trading":
                     token, mult = _split_base(s["baseCoin"])
                     if token not in out or mult < out[token]["mult"]:
-                        out[token] = {"contract": s["symbol"], "base": s["baseCoin"], "mult": mult}
+                        tick = float((s.get("priceFilter") or {}).get("tickSize") or 0)
+                        out[token] = {"contract": s["symbol"], "base": s["baseCoin"], "mult": mult, "tick": tick}
             cursor = res.get("nextPageCursor")
             if not cursor:
                 return out
+
+    def volumes_24h(self):
+        rows = http_json(self.BASE + "/tickers", {"category": "linear"})["result"]["list"]
+        return {r["symbol"]: float(r.get("turnover24h") or 0) for r in rows}
 
     def tickers(self):
         rows = http_json(self.BASE + "/tickers", {"category": "linear"})["result"]["list"]
@@ -235,6 +246,10 @@ class MarketData:
         # Les noms de contrats doivent venir de la même place que la liste des contrats.
         self.contracts()
         return self.venue.tickers()
+
+    def volumes_24h(self):
+        self.contracts()
+        return self.venue.volumes_24h()
 
     def secondary_tickers(self):
         """Prix des contrats sur une autre place, pour contrôle croisé ({} si indisponible)."""
@@ -393,16 +408,25 @@ class WebSocket:
             pass
 
 
-def binance_stream_urls(contracts):
+STREAM_CHUNK = 50  # contrats par connexion WebSocket : charge et gigue réduites par connexion
+
+
+def binance_stream_urls(contracts, chunk=STREAM_CHUNK):
     """Binance sépare ses flux : transactions sur /market, carnet sur /public.
 
     Le carnet passe par depth5@100ms (10 mises à jour par seconde, 5 niveaux) plutôt que
     bookTicker (chaque changement) : 4× moins de messages, et la taille des files d'attente.
+    Les contrats sont répartis par paquets de `chunk`, une connexion par paquet et par flux.
     """
     names = [c.lower() for c in contracts]
     base = "wss://fstream.binance.com/{}/stream?streams="
-    return {"transactions": base.format("market") + "/".join(n + "@aggTrade" for n in names),
-            "carnet": base.format("public") + "/".join(n + "@depth5@100ms" for n in names)}
+    groups = [names[i:i + chunk] for i in range(0, len(names), chunk)]
+    urls = {}
+    for i, g in enumerate(groups, 1):
+        tag = " {}/{}".format(i, len(groups)) if len(groups) > 1 else ""
+        urls["transactions" + tag] = base.format("market") + "/".join(n + "@aggTrade" for n in g)
+        urls["carnet" + tag] = base.format("public") + "/".join(n + "@depth5@100ms" for n in g)
+    return urls
 
 
 def binance_clock_offset_ms(samples=5):

@@ -74,7 +74,8 @@ DEFAULT_CONFIG = {
     "exchange": "binanceusdm",
     # -- scalping (scalper.py) --
     "frais_maker_pct": 0.02,           # frais des ordres limite (frais_pct = ordres au marché)
-    "scalp_cryptos": 40,               # contrats suivis en temps réel (les plus liquides)
+    "scalp_cryptos": 200,              # contrats suivis au plus (les plus échangés d'abord, 0 = tous)
+    "scalp_volume_24h_min_usd": 10000000,  # volume quotidien minimal d'un contrat pour être suivi
     "scalp_familles": ["elan", "rebond"],  # short pendant une chute / short après une poussée trop rapide
     "scalp_entree": "auto",            # « auto » (le modèle choisit), « limite » (maker) ou « marche »
     "scalp_entree_delai_s": 3,         # ordre limite annulé s'il n'est pas exécuté à temps
@@ -90,7 +91,9 @@ DEFAULT_CONFIG = {
     "scalp_seuil_momentum_bps": 2,
     "scalp_seuil_rebond_bps": 4,       # hausse minimale sur 5 s pour un short « rebond »
     "scalp_volume_min_usd": 20000,
-    "scalp_spread_max_bps": 3,
+    "scalp_spread_max_bps": 5,
+    "scalp_stop_min_ecarts": 3,        # stop d'au moins 3 fois l'écart achat/vente du moment
+    "scalp_pas_max_bps": 3,            # contrat exclu si son pas de prix dépasse 3 pb
     "scalp_sortie_flux": 0.8,          # sortie anticipée si les achats dominent nettement
     "scalp_pause_s": 0,                # 0 = peut reshorter immédiatement après une sortie
     "scalp_taille_min_pct": 5,         # taille selon la confiance du modèle, en % du capital
@@ -98,12 +101,13 @@ DEFAULT_CONFIG = {
     "scalp_ev_min_bps": 1.0,           # gain espéré minimal après frais pour un trade réel
     "scalp_apprentissage_min": 200,    # trades fantômes par profil avant le premier trade réel
     "scalp_quarantaine_bps": -10,      # pause 1 h si les 5 derniers trades réels perdent plus en moyenne
-    "scalp_fantomes_max": 3000,
-    "scalp_positions_max": 5,
+    "scalp_fantomes_max": 10000,
+    "scalp_positions_max": 0,          # 0 = pas de limite : seul le levier borne l'exposition
     "scalp_long": False,               # short uniquement
     "scalp_exploration": True,         # trades réels de petite taille pendant et après l'apprentissage
     "scalp_exploration_taille_pct": 2,  # taille d'un trade d'exploration, en % du capital
-    "scalp_exploration_par_heure": 60,
+    "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
+    "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
     "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
     "scalp_filtre_tendance": 20,       # pas de short si le score 15 min dépasse ce seuil
 }

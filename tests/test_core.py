@@ -230,6 +230,52 @@ class ExplorationTest(unittest.TestCase):
         self.burst(sc, 20000)
         self.assertFalse(sc.trades, "plafond horaire d'exploration respecté")
 
+    def test_unlimited_with_per_crypto_spacing(self):
+        sc = self.make(scalp_exploration_par_heure=0, scalp_exploration_espacement_s=10)
+        sc.last_explore["BTCUSDT"] = 0
+        self.assertFalse(sc.can_explore(5000, "BTCUSDT"), "même crypto : 10 s d'écart minimum")
+        self.assertTrue(sc.can_explore(5000, "ETHUSDT"), "autre crypto : pas d'attente")
+        sc.explore_times.extend(range(0, 5000, 10))  # 500 explorations dans l'heure
+        self.assertTrue(sc.can_explore(11000, "BTCUSDT"), "pas de plafond horaire")
+
+    def test_unlimited_simultaneous_positions(self):
+        sc = self.make(scalp_positions_max=0)
+        sc.trades = {str(i): None for i in range(100)}
+        self.assertTrue(sc.can_open())
+
+    def test_universe_from_exchange_volume(self):
+        sc = self.make(scalp_volume_24h_min_usd=10e6, scalp_cryptos=0)
+
+        class FakeMD:
+            def contracts(self):
+                ticks = {"BTC": 0.1, "XRP": 0.0001, "PEPE": 1e-7, "USDC": 0.0001, "TINY": 0.01, "COARSE": 0.01}
+                return {t: {"contract": t + "USDT", "base": t, "mult": 1, "tick": k} for t, k in ticks.items()}
+
+            def tickers(self):
+                prices = {"BTC": 80000, "XRP": 1.3, "PEPE": 0.004, "USDC": 1, "TINY": 1, "COARSE": 2.0}
+                return {t + "USDT": {"price": p, "funding": 0.0} for t, p in prices.items()}
+
+            def volumes_24h(self):
+                return {"BTCUSDT": 9e9, "XRPUSDT": 5e8, "PEPEUSDT": 2e7, "USDCUSDT": 1e9, "TINYUSDT": 1e5,
+                        "COARSEUSDT": 1e8}
+
+        sc.trader.md = FakeMD()
+        sc.select_universe()
+        self.assertEqual(list(sc.coins), ["BTCUSDT", "XRPUSDT", "PEPEUSDT"],
+                         "stablecoin, contrat peu échangé et pas de prix trop grossier (50 pb) exclus")
+
+    def test_stop_must_exceed_spread(self):
+        sc = self.make()
+        opened = []
+        sc.open = lambda *a, **k: opened.append(a[3]["stop_bps"])
+        sc.on_depth("BTCUSDT", 10000, [["99.96", "5"]] * 5, [["100", "1"]] * 5)  # écart de 4 pb
+        for i in range(30):
+            sc.on_trade("BTCUSDT", 10000 + i * 200, 100 * (1 - i * 0.0001), 1000.0, True)
+        self.assertTrue(opened)
+        self.assertTrue(all(stop >= 3 * 4 for stop in opened), "pas de stop plus serré que 3 écarts")
+        shadow_stops = {s.profile["stop_bps"] for s in sc.shadows["BTCUSDT"]}
+        self.assertNotIn(8, shadow_stops, "le profil éclair (stop 8 pb) est écarté")
+
     def test_spread_over_the_hour(self):
         sc = self.make(scalp_exploration_par_heure=60)
         self.assertTrue(sc.can_explore(0))
