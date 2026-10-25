@@ -14,3 +14,7 @@ etat_*.json.tmp
 courbe_*.csv
 .venv/
 point_de_depart.json
+*.sans-latence
+*.session-*
+*.ancien
+*.tmp
