@@ -89,6 +89,8 @@ class OnlineLogit:
         self.base_rate = 0.5   # part de trades gagnants observée (moyenne mobile)
         self.cal_n = [0.0] * CAL_BINS
         self.cal_w = [0.0] * CAL_BINS
+        self.cal_net = [0.0] * CAL_BINS  # résultat net réel cumulé par tranche (pb)
+        self.avg_net = 0.0               # résultat net moyen observé (moyenne mobile, pb)
 
     def predict(self, x):
         z = self.scaler.transform(x)
@@ -109,6 +111,19 @@ class OnlineLogit:
         i = min(int(raw * CAL_BINS), CAL_BINS - 1)
         return (self.cal_w[i] + CAL_PRIOR * self.base_rate) / (self.cal_n[i] + CAL_PRIOR), raw
 
+    def estimate(self, x):
+        """Estimation calibrée sur les résultats réels : probabilité de gain, résultat net moyen (pb)
+        et nombre de cas observés dans la tranche. Le résultat net inclut tout ce que la formule
+        théorique ignore : glissement du stop, sorties à la durée max ou sur flux inversé."""
+        z = self.scaler.transform(x)
+        raw = sigmoid(self.b + sum(w * v for w, v in zip(self.w, z)))
+        if max(abs(v) for v in z) > NOVELTY_MAX or self.seen < 50:
+            return {"p": self.base_rate, "net": self.avg_net, "n": 0.0, "brut": raw}
+        i = min(int(raw * CAL_BINS), CAL_BINS - 1)
+        n = self.cal_n[i]
+        return {"p": (self.cal_w[i] + CAL_PRIOR * self.base_rate) / (n + CAL_PRIOR),
+                "net": (self.cal_net[i] + CAL_PRIOR * self.avg_net) / (n + CAL_PRIOR), "n": n, "brut": raw}
+
     def calibration(self, threshold=0.3):
         """(probabilité brute moyenne annoncée, taux réel) sur les tranches ≥ threshold."""
         n = w = mid = 0.0
@@ -118,13 +133,17 @@ class OnlineLogit:
             mid += self.cal_n[i] * (i + 0.5) / CAL_BINS
         return (mid / n, w / n) if n >= 5 else (None, None)
 
-    def update(self, x, y):
+    def update(self, x, y, net=None):
         p_before = self.predict(x) if self.seen else 0.5  # évaluation honnête : avant d'apprendre
         i = min(int(p_before * CAL_BINS), CAL_BINS - 1)
         self.cal_n = [n * CAL_DECAY for n in self.cal_n]
         self.cal_w = [v * CAL_DECAY for v in self.cal_w]
+        self.cal_net = [v * CAL_DECAY for v in self.cal_net]
         self.cal_n[i] += 1
         self.cal_w[i] += y
+        if net is not None:
+            self.cal_net[i] += net
+            self.avg_net += 0.02 * (net - self.avg_net)
         a = 0.02
         self.accuracy += a * (float((p_before > 0.5) == bool(y)) - self.accuracy)
         self.brier += a * ((p_before - y) ** 2 - self.brier)
@@ -149,6 +168,7 @@ class OnlineLogit:
     def to_dict(self):
         return {"w": self.w, "b": self.b, "seen": self.seen, "accuracy": self.accuracy, "brier": self.brier,
                 "base_rate": self.base_rate, "cal_n": self.cal_n, "cal_w": self.cal_w,
+                "cal_net": self.cal_net, "avg_net": self.avg_net,
                 "scaler": {"count": self.scaler.count, "mean": self.scaler.mean, "m2": self.scaler.m2}}
 
     @classmethod
@@ -158,8 +178,10 @@ class OnlineLogit:
             return m  # variables modifiées : on repart de zéro
         m.w, m.b, m.seen = d["w"], d["b"], d["seen"]
         m.accuracy, m.brier, m.base_rate = d["accuracy"], d["brier"], d["base_rate"]
-        m.cal_n = d.get("cal_n") or [0.0] * CAL_BINS
-        m.cal_w = d.get("cal_w") or [0.0] * CAL_BINS
+        if d.get("cal_net"):
+            m.cal_n, m.cal_w, m.cal_net = d["cal_n"], d["cal_w"], d["cal_net"]
+            m.avg_net = d.get("avg_net", 0.0)
+        # sinon : ancien format sans résultat net, le calibrage repart de zéro (le modèle est conservé)
         s = d["scaler"]
         m.scaler.count, m.scaler.mean, m.scaler.m2 = s["count"], s["mean"], s["m2"]
         return m

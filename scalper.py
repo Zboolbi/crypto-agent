@@ -29,7 +29,6 @@ import logging
 import math
 import os
 import queue
-import random
 import sys
 import threading
 import time
@@ -321,7 +320,6 @@ class Scalper:
         self.equity_cache = self.state["cash"]
         self.explore_times = collections.deque()  # instants des trades d'exploration (dernière heure)
         self.last_explore = {}                    # dernière exploration par crypto
-        self.rng = random.Random()
         self._stop = threading.Event()
 
     # -- état ---------------------------------------------------------------------
@@ -341,6 +339,9 @@ class Scalper:
                         if os.path.exists(path):
                             os.replace(path, path + ".sans-latence")
                     return self._load_state()
+                if st.get("version_validation", 1) < 2:
+                    st["validation"] = {}  # décision fondée sur le gain net calibré : validation à refaire
+                    st["version_validation"] = 2
                 if st.get("version_modeles", 1) < 2:
                     # Modèles « rebond » entraînés avec une sortie sur flux inversé erronée : on repart de zéro.
                     for k in [k for k in st["modeles"] if k.startswith("rebond/")]:
@@ -356,7 +357,7 @@ class Scalper:
     def _fresh_state(self):
         cap = self.cfg["capital_initial"]
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
-                "modeles": {}, "validation": {}, "version_modeles": 3, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
+                "modeles": {}, "validation": {}, "version_modeles": 3, "version_validation": 2, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
                 "stats": {"trades": 0, "gagnants": 0, "pnl": 0.0, "frais": 0.0, "volume": 0.0,
                           "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time(),
                           "exploration": 0, "exploration_pnl": 0.0}}
@@ -512,7 +513,7 @@ class Scalper:
             del hist[:-200]
         if sim.maker_entry:
             self._fill_stat(sim.key, 1.0)
-        self.models[sim.key].update(sim.features, 1.0 if net > 0 else 0.0)
+        self.models[sim.key].update(sim.features, 1.0 if net > 0 else 0.0, net)
         sym = self.state["cryptos"].setdefault(c, {"edge": 0.0, "n": 0})
         sym["edge"] += 0.05 * (net - sym["edge"])
         sym["n"] += 1
@@ -589,21 +590,37 @@ class Scalper:
             _, prof, maker, key, p, win, loss, ev = best
             self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, group=group)
         elif self.can_explore(t, c, group):
-            # Exploration : petit trade réel sur une variante tirée au hasard, pour apprendre en tradant.
-            fam, prof, maker, _ = self.rng.choice(variants)
-            key = model_key(fam, prof, maker)
-            m = self.models[key]
-            p = m.calibrated(x)[0] if m.seen >= 50 else m.base_rate
-            ev, win, loss = self.expected(prof, p, maker)
-            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True, group=group)
+            # Exploration ciblée : trade réel sur la variante la plus prometteuse, pour apprendre en tradant.
+            pick = self.explore_pick(variants, x)
+            if pick:
+                _, fam, prof, maker, key, est = pick
+                _, win, loss = self.expected(prof, est["p"], maker)
+                self.open(c, t, side, prof, maker, key, x, est["p"], win, loss, est["net"], explore=True, group=group)
 
     def model_score(self, key, prof, maker, x):
-        """Gain espéré (pb) de la variante selon le modèle calibré, pondéré par l'exécution des ordres limite."""
+        """Gain net espéré (pb) de la variante : résultat net réellement obtenu dans des contextes
+        semblables (calibrage), pondéré par le taux d'exécution des ordres limite."""
         if not self.ready(key):
             return float("-inf"), None, None, None, None
-        p, _ = self.models[key].calibrated(x)
-        ev, win, loss = self.expected(prof, p, maker)
-        return ev * (self.fill_rate(key) if maker else 1.0), p, win, loss, ev
+        est = self.models[key].estimate(x)
+        _, win, loss = self.expected(prof, est["p"], maker)  # gains/pertes théoriques : taille seulement
+        ev = est["net"]
+        return ev * (self.fill_rate(key) if maker else 1.0), est["p"], win, loss, ev
+
+    def explore_pick(self, variants, x):
+        """Exploration ciblée : variante au meilleur gain net espéré, avec un bonus d'autant plus grand
+        qu'elle est peu connue. Aucune exploration si même ce score optimiste est trop négatif."""
+        best = None
+        for fam, prof, maker, _ in variants:
+            key = model_key(fam, prof, maker)
+            est = self.models[key].estimate(x)
+            fill = self.fill_rate(key) if maker else 1.0
+            score = est["net"] * fill + self.cfg["scalp_exploration_bonus_bps"] / math.sqrt(1 + est["n"])
+            if best is None or score > best[0]:
+                best = (score, fam, prof, maker, key, est)
+        if best and best[0] >= self.cfg["scalp_exploration_ev_min_bps"]:
+            return best
+        return None
 
     def validated(self, key):
         """La variante n'a le droit de trader que si les trades fantômes que le modèle aurait pris

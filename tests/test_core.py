@@ -142,6 +142,7 @@ class ScalperTest(unittest.TestCase):
             good = key.startswith("elan/") and key.endswith("limite")
             m.seen, m.b, m.base_rate = CFG["scalp_apprentissage_min"], (5.0 if good else -5.0), 0.5
             m.cal_n, m.cal_w = [100.0] * 10, [(90.0 if good else 1.0)] * 10
+            m.cal_net, m.avg_net = [(800.0 if good else -1500.0)] * 10, (8.0 if good else -15.0)
             m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)  # contextes déjà vus
             sc.state["remplissage"][key] = 0.9
             sc.state["validation"][key] = [5.0] * 60 if good else [-5.0] * 60  # validé hors échantillon
@@ -168,6 +169,7 @@ class ScalperTest(unittest.TestCase):
         for m in sc.models.values():  # le modèle brut se croit sûr de lui, mais n'a gagné que 5 % du temps
             m.seen, m.b, m.base_rate = CFG["scalp_apprentissage_min"], 5.0, 0.05
             m.cal_n, m.cal_w = [100.0] * 10, [5.0] * 10
+            m.cal_net, m.avg_net = [-1500.0] * 10, -15.0       # en réalité : -15 pb net en moyenne
             m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)
         self._sell_burst(30000)
         self.assertFalse(sc.trades, "aucun trade quand les résultats réels démentent le modèle")
@@ -455,7 +457,46 @@ class RebondExitTest(unittest.TestCase):
             self.assertEqual(s.state == "ferme", expect_exit, key)
 
 
+class TargetedExplorationTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sc = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def set_model(self, key, net, n):
+        m = self.sc.models[key]
+        m.seen, m.base_rate, m.avg_net = 1000, 0.4, net
+        m.cal_n, m.cal_w, m.cal_net = [n] * 10, [0.4 * n] * 10, [net * n] * 10
+        m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)
+
+    def test_picks_most_promising_variant_and_skips_hopeless_ones(self):
+        variants = [v for v in self.sc.variants if v[0] == "elan" and v[3] == "court" and not v[2]]
+        keys = [scalper.model_key(f, p, m) for f, p, m, _ in variants]
+        for k in keys:
+            self.set_model(k, -20.0, 400)           # bien connues et nettement perdantes
+        x = [0.0] * len(FEATURES)
+        self.assertIsNone(self.sc.explore_pick(variants, x), "rien d'assez prometteur : pas d'exploration")
+        self.set_model(keys[1], 2.0, 400)
+        self.assertEqual(self.sc.explore_pick(variants, x)[4], keys[1], "la variante la plus prometteuse")
+        self.set_model(keys[2], -5.0, 0)            # inconnue : le bonus lui donne sa chance
+        self.assertEqual(self.sc.explore_pick(variants, x)[4], keys[2])
+
+
 class CalibrationTest(unittest.TestCase):
+    def test_net_result_is_calibrated_on_real_outcomes(self):
+        rnd = random.Random(2)
+        m = OnlineLogit()
+        for _ in range(3000):
+            x = [rnd.gauss(0, 1) for _ in FEATURES]
+            win = rnd.random() < 0.6                 # 60 % de gains… mais de +4 pb contre -27 pb
+            m.update(x, 1.0 if win else 0.0, 4.0 if win else -27.0)
+        est = m.estimate([0.0] * len(FEATURES))
+        self.assertGreater(est["p"], 0.5, "souvent gagnant")
+        self.assertLess(est["net"], -5, "mais perdant en moyenne : c'est ce chiffre qui décide")
+
+
     def test_calibrated_matches_reality_and_ignores_unknown_contexts(self):
         rnd = random.Random(0)
         m = OnlineLogit()

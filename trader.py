@@ -130,6 +130,8 @@ DEFAULT_CONFIG = {
     "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
     "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
     "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
+    "scalp_exploration_bonus_bps": 20,  # exploration ciblée : bonus pour les variantes peu connues (pb / √(1+n))
+    "scalp_exploration_ev_min_bps": -3,  # pas d'exploration si même le score optimiste est en dessous
     "scalp_exploration_budget_jour_pct": 25,  # pertes d'exploration tolérées par jour, en % du capital (0 = sans limite)
     # -- arbitrage du taux de financement (funding.py) --
     "funding_capital": 10000,          # capital fictif dédié ($)
