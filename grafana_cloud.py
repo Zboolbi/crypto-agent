@@ -31,7 +31,7 @@ import metriques
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(HERE, ".env")
 STATE_PATH = os.path.join(HERE, "donnees", "grafana_cloud.json")
-PERIOD_S = 15
+PERIOD_S = 10
 KEYS = {
     "GRAFANA_CLOUD_URL": "Adresse de votre pile Grafana (ex. https://votre-nom.grafana.net)",
     "GRAFANA_CLOUD_INFLUX_URL": "Adresse d'envoi InfluxDB (…/api/v1/push/influx/write)",
@@ -298,6 +298,22 @@ def build_dashboard(prom, loki):
     def g(strategy, field="gain"):
         return f'agent_valeur_{field}{{strategie="{strategy}"}}'
 
+    def wallet(title, x, strategy):
+        """Un portefeuille : valeur en temps réel, gain depuis ses 10 000 $ et fonds non engagés."""
+        return panel("stat", title, (x, 0, 4, 4),
+                     [target(g(strategy, "valeur"), instant=True, legend="Valeur", ref="A"),
+                      target(g(strategy), instant=True, legend="Gain", ref="B"),
+                      target(g(strategy, "disponible"), instant=True, legend="Disponible", ref="C")],
+                     unit="currencyUSD",
+                     options={"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "none", "colorMode": "value",
+                              "textMode": "value_and_name", "orientation": "horizontal",
+                              "text": {"titleSize": 12, "valueSize": 20}},
+                     overrides=[{"matcher": {"id": "byRegexp", "options": "Valeur|Disponible"},
+                                 "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": blue}}]},
+                                {"matcher": {"id": "byName", "options": "Gain"},
+                                 "properties": [{"id": "thresholds", "value": pnl_steps},
+                                                {"id": "color", "value": {"mode": "thresholds"}}]}])
+
     online = panel("stat", "Agent", (20, 0, 4, 4), [target("max(agent_sante_en_ligne)", instant=True)],
                    decimals=0, steps={"mode": "absolute", "steps": [{"color": red, "value": None},
                                                                     {"color": green, "value": 1}]},
@@ -305,11 +321,11 @@ def build_dashboard(prom, loki):
     online["fieldConfig"]["defaults"]["mappings"] = [{"type": "value", "options": {
         "0": {"text": "ARRÊTÉ", "color": red}, "1": {"text": "EN LIGNE", "color": green}}}]
     panels = [
-        stat("Valeur", 0, g("total", "valeur"), color=blue),
+        stat("Valeur totale (30 k$)", 0, g("total", "valeur"), color=blue),
         stat("Gain total", 4, g("total"), steps=pnl_steps),
-        stat("Scalping", 8, g("scalping"), steps=pnl_steps),
-        stat("Tendance", 12, g("tendance"), steps=pnl_steps),
-        stat("Financement", 16, g("financement"), steps=pnl_steps),
+        wallet("⚡ Scalping (10 k$)", 8, "scalping"),
+        wallet("📈 Tendance (10 k$)", 12, "tendance"),
+        wallet("⚖ Financement (10 k$)", 16, "financement"),
         online,
         panel("timeseries", "Gain / perte par stratégie ($)", (0, 4, 16, 9),
               [target("agent_valeur_gain", legend="{{strategie}}")], unit="currencyUSD",
@@ -389,14 +405,14 @@ def build_dashboard(prom, loki):
         p["description"] = desc
         return p
 
-    dispo = panel("stat", "Fonds disponibles", (0, 4, 4, 5), [target(g("total", "disponible"), instant=True)],
+    dispo = panel("stat", "Fonds dispo · total", (0, 4, 4, 5), [target(g("total", "disponible"), instant=True)],
                   unit="currencyUSD", color=blue,
                   options={"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "area", "colorMode": "value"})
     dispo["description"] = ("Valeur des trois portefeuilles moins le capital immobilisé dans les positions ouvertes "
                             "(taille pour le scalping, marge pour la tendance, trésorerie pour le financement).")
     panels += [
         dispo,
-        rate("Performance", 4, g("total", "performance_pct"),
+        rate("Performance · total", 4, g("total", "performance_pct"),
              [{"color": red, "value": None}, {"color": green, "value": 0}],
              "Gain ou perte total rapporté au capital de départ des trois portefeuilles."),
         rate("Taux de réussite", 8, g("total", "reussite_pct"),
@@ -418,8 +434,14 @@ def build_dashboard(prom, loki):
                                                     "Value #B": "Réussite (%)", "Value #C": "Échec (%)",
                                                     "Value #D": "Disponible ($)"}}}]),
     ]
+    # Rangée du haut plus haute : chaque portefeuille affiche valeur, gain et disponible.
+    for p in panels:
+        if p["gridPos"]["y"] == 0:
+            p["gridPos"]["h"] = 6
+        else:
+            p["gridPos"]["y"] += 2
     return {"uid": "crypto-agent", "title": "Crypto Agent", "tags": ["crypto", "agent"], "timezone": "browser",
-            "refresh": "30s", "time": {"from": "now-6h", "to": "now"}, "schemaVersion": 39, "panels": panels,
+            "refresh": "10s", "time": {"from": "now-6h", "to": "now"}, "schemaVersion": 39, "panels": panels,
             "description": "Agent de trading crypto en mode papier : données envoyées depuis le Mac (grafana_cloud.py)."}
 
 

@@ -1,6 +1,6 @@
 # Récapitulatif du projet crypto-agent
 
-**État au 25/10/2026, 15:20 (heure de Paris, heure d'hiver depuis cette nuit).**
+**État au 25/10/2026, 15:30 (heure de Paris, heure d'hiver depuis cette nuit).**
 Ce document est la référence de travail. Le mettre à jour (date et heure en tête) après chaque étape importante, plutôt que de relire tout le code ou tout l'historique.
 
 ---
@@ -93,6 +93,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | 25/10 10:05 | **Stratégie longue ajoutée** (30 s à 10 min) en parallèle du scalping court. | À 10:07 : 77 trades d'exploration, 48 % gagnants, −45,16 $. |
 | 25/10 10:19 | **Diagnostic** : 100 % des pertes viennent de l'exploration (variantes tirées au hasard) ; gain espéré théorique faux (validation des variantes « choisies » entre −9 et −27 pb) ; modèles longs trop confiants. Correction : décision sur le gain net calibré + exploration ciblée + validation remise à zéro. | Avant (09:57–10:19) : 121 trades, 46 % gagnants, −80,85 $, −7,9 pb/trade. Après (10:20–10:36) : 75 trades, 47 %, −40,00 $, −6,6 pb/trade. Seuils d'exploration resserrés à 10:40. |
 | 25/10 10:05–10:53 | Bilan de l'observation de 45 min (mélange avant/après les corrections de 10:20 et 10:40). | Court : 150 trades, 45 % gagnants, −84,89 $, −7,9 pb. Long : 43 trades, 33 %, −57,72 $, −13,6 pb ; seul cinq_min est légèrement positif (+1,14 $ sur 8 trades). Presque tout en exploration. Scalping à 9 819 $ (−1,81 %). |
+| 25/10 15:25 | Encarts par portefeuille (« Scalping (10 k$) »…) : **valeur en temps réel, gain, disponible** ; fonds commun « Fonds dispo · total » ; Cloud rafraîchi toutes les 10 s (envoi 10 s). L'utilisateur avait cru à une perte de moitié (fonds disponibles 15,6 k$ ≠ valeur 29,5 k$) : à expliquer clairement, les fonds disponibles = argent non engagé. | Scalping 9 470 $ (−5,3 %), tendance ≈ 10 060 $, financement ≈ 9 995 $, total ≈ 29 520 $ (−1,6 %). Constat partagé avec l'utilisateur : l'agent ne gagne pas d'argent à ce jour. |
 | 25/10 15:15 | Tableaux de bord (Cloud et local) : seconde rangée **Fonds disponibles, Performance, Taux de réussite, Taux d'échec** + tableau par stratégie. « Disponible » = valeur − capital immobilisé (taille en scalping, marge en tendance, trésorerie en financement), plafonné à 0. | À 15:15 : 29 530 $ au total, 15 581 $ disponibles, performance −1,55 %, réussite 39,5 %, échec 60,5 %. Scalping −5,2 % depuis 09:57. |
 | 25/10 15:00 | **Mise en ligne sur Grafana Cloud** : informations de la pile relevées dans le Chrome de l'utilisateur (avec son accord), jetons saisis par lui (deux saisies ratées : jeton collé plusieurs fois, puis compte de service sans rôle, réglé en Editor). Envoi actif ; 15 panneaux vérifiés (0 erreur) et contrôlés visuellement. | Le Mac doit rester allumé pour que les données s'actualisent. |
 | 25/10 10:47 | **Bascule sur Grafana local** à la demande de l'utilisateur (refus de Grafana Cloud). Export SQLite, provisionnement, 20 panneaux vérifiés via l'API (0 erreur) et visuellement. | 49 tests. |

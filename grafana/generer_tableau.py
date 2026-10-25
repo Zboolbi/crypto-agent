@@ -74,6 +74,21 @@ def unit_of(field, unit, decimals=2):
             "properties": [{"id": "unit", "value": unit}, {"id": "decimals", "value": decimals}]}
 
 
+def wallet(title, grid, strategy):
+    """Un portefeuille : valeur en temps réel, gain depuis ses 10 000 $ et fonds non engagés."""
+    sql = (f"SELECT valeur AS \"Valeur\", valeur - depart AS \"Gain\", disponible AS \"Disponible\" FROM valeurs "
+           f"WHERE strategie = '{strategy}' ORDER BY ts DESC LIMIT 1")
+    return panel("stat", title, grid, sql, unit="currencyUSD", decimals=2,
+                 options={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+                          "colorMode": "value", "graphMode": "none", "textMode": "value_and_name",
+                          "orientation": "horizontal", "text": {"titleSize": 12, "valueSize": 20}},
+                 overrides=[{"matcher": {"id": "byRegexp", "options": "Valeur|Disponible"},
+                             "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": BLUE}}]},
+                            {"matcher": {"id": "byName", "options": "Gain"},
+                             "properties": [{"id": "thresholds", "value": {"mode": "absolute", "steps": PNL_STEPS}},
+                                            {"id": "color", "value": {"mode": "thresholds"}}]}])
+
+
 def latest(strategy, expr):
     return f"SELECT {expr} AS v FROM valeurs WHERE strategie = '{strategy}' ORDER BY ts DESC LIMIT 1"
 
@@ -82,14 +97,13 @@ def build():
     panels = [row("Vue d'ensemble · portefeuilles fictifs (mode papier)", 0)]
     y = 1
     panels += [
-        stat("Valeur", (0, y, 4, 4), latest("total", "valeur"), fixed=BLUE,
-             desc="Somme des trois portefeuilles fictifs (scalping, tendance, financement)."),
+        stat("Valeur totale (30 k$)", (0, y, 4, 4), latest("total", "valeur"), fixed=BLUE,
+             desc="Somme des trois portefeuilles fictifs (scalping, tendance, financement), 10 000 $ de départ chacun."),
         stat("Gain total", (4, y, 4, 4), latest("total", "valeur - depart"), steps=PNL_STEPS,
              desc="Valeur actuelle moins capital de départ, positions ouvertes comprises."),
-        stat("Scalping", (8, y, 4, 4), latest("scalping", "valeur - depart"), steps=PNL_STEPS,
-             desc="Court terme et long terme (30 s à 10 min) réunis."),
-        stat("Tendance", (12, y, 4, 4), latest("tendance", "valeur - depart"), steps=PNL_STEPS),
-        stat("Financement", (16, y, 4, 4), latest("financement", "valeur - depart"), steps=PNL_STEPS),
+        wallet("⚡ Scalping (10 k$)", (8, y, 4, 4), "scalping"),
+        wallet("📈 Tendance (10 k$)", (12, y, 4, 4), "tendance"),
+        wallet("⚖ Financement (10 k$)", (16, y, 4, 4), "financement"),
         stat("Agent", (20, y, 4, 4),
              "SELECT CASE WHEN en_ligne = 1 AND ts > strftime('%s','now') - 30 THEN 'EN LIGNE' ELSE 'ARRÊTÉ' END AS v "
              "FROM sante ORDER BY ts DESC LIMIT 1", unit="none", decimals=None,
@@ -221,10 +235,10 @@ def build():
     rate_steps_up = [{"color": RED, "value": None}, {"color": ORANGE, "value": 50}, {"color": GREEN, "value": 55}]
     rate_steps_down = [{"color": GREEN, "value": None}, {"color": ORANGE, "value": 45}, {"color": RED, "value": 50}]
     panels += [
-        stat("Fonds disponibles", (0, 5, 4, 5), latest("total", "disponible"), fixed=BLUE,
+        stat("Fonds dispo · total", (0, 5, 4, 5), latest("total", "disponible"), fixed=BLUE,
              desc="Valeur des trois portefeuilles moins le capital immobilisé dans les positions ouvertes "
                   "(taille pour le scalping, marge pour la tendance, trésorerie pour le financement)."),
-        stat("Performance", (4, 5, 4, 5), latest("total", "100.0 * (valeur - depart) / depart"), unit="percent",
+        stat("Performance · total", (4, 5, 4, 5), latest("total", "100.0 * (valeur - depart) / depart"), unit="percent",
              steps=PNL_STEPS, decimals=1, desc="Gain ou perte total rapporté au capital de départ."),
         stat("Taux de réussite", (8, 5, 4, 5), latest("total", "100.0 * gagnants / MAX(trades, 1)"), unit="percent",
              steps=rate_steps_up, decimals=1, desc="Part des trades fermés gagnants, frais compris."),
@@ -238,6 +252,12 @@ def build():
               "AND strategie != 'total'",
               overrides=[pnl_color("Performance (%)"), unit_of("Disponible ($)", "currencyUSD")]),
     ]
+    # Rangée du haut plus haute : chaque portefeuille affiche valeur, gain et disponible.
+    for p in panels:
+        if p["gridPos"]["y"] == 1 and p["type"] != "row":
+            p["gridPos"]["h"] = 6
+        elif p["gridPos"]["y"] >= 5:
+            p["gridPos"]["y"] += 2
     return {"uid": "crypto-agent", "title": "Crypto Agent", "tags": ["crypto", "agent"], "timezone": "browser",
             "refresh": "5s", "time": {"from": "now-6h", "to": "now"}, "schemaVersion": 39, "version": 1,
             "editable": False, "graphTooltip": 1, "panels": panels,
