@@ -245,8 +245,10 @@ def datasources(env):
         if "HTTP 403" not in str(e):
             raise
         return DEFAULT_SOURCES
-    prom = next((d for d in sources if d["type"] == "prometheus" and "usage" not in d["name"].lower()), None)
-    loki = next((d for d in sources if d["type"] == "loki" and "usage" not in d["name"].lower()), None)
+    # Pile Grafana Cloud : « grafanacloud-<pile>-prom » et « grafanacloud-<pile>-logs » ; on écarte les
+    # sources annexes (usage, historique des alertes…).
+    prom = next((d for d in sources if d["type"] == "prometheus" and d["name"].endswith("-prom")), None)
+    loki = next((d for d in sources if d["type"] == "loki" and d["name"].endswith("-logs")), None)
     if not prom or not loki:
         raise CloudError("Sources Prometheus ou Loki introuvables dans la pile Grafana Cloud.")
     return {"type": "prometheus", "uid": prom["uid"]}, {"type": "loki", "uid": loki["uid"]}
@@ -330,9 +332,10 @@ def build_dashboard(prom, loki):
                                  "graphMode": "none"}))
         panels.append(panel(
             "table", f"{label} · positions ouvertes", (x, y + 4, 12, 7),
-            [target(f'agent_position_pnl{{strategie="{s}"}}', instant=True, fmt="table")], unit="currencyUSD",
+            [target(f'max by (crypto, variante, etat) (agent_position_pnl{{strategie="{s}"}})', instant=True, fmt="table")],
+            unit="currencyUSD",
             transformations=[{"id": "organize", "options": {
-                "excludeByName": {"Time": True, "__name__": True, "strategie": True, "instance": True, "job": True},
+                "excludeByName": {"Time": True, "__name__": True, "strategie": True, "instance": True, "job": True, "__proxy_source__": True},
                 "renameByName": {"Value": "P&L", "crypto": "Crypto", "variante": "Variante", "etat": "État"}}}],
             overrides=[{"matcher": {"id": "byName", "options": "P&L"}, "properties": [
                 {"id": "custom.cellOptions", "value": {"type": "color-text"}}, {"id": "thresholds", "value": pnl_steps},
@@ -340,10 +343,11 @@ def build_dashboard(prom, loki):
     y += 11
     panels.append(panel(
         "table", "📈 Tendance et ⚖ financement · positions ouvertes", (0, y, 12, 9),
-        [target('agent_position_pnl{strategie=~"tendance|financement"}', instant=True, fmt="table")],
+        [target('max by (strategie, crypto, variante) (agent_position_pnl{strategie=~"tendance|financement"})',
+                instant=True, fmt="table")],
         unit="currencyUSD",
         transformations=[{"id": "organize", "options": {
-            "excludeByName": {"Time": True, "__name__": True, "instance": True, "job": True, "etat": True},
+            "excludeByName": {"Time": True, "__name__": True, "instance": True, "job": True, "__proxy_source__": True, "etat": True},
             "renameByName": {"Value": "P&L / financement", "crypto": "Crypto", "variante": "Sens",
                              "strategie": "Stratégie"}}}]))
     panels.append(panel(
@@ -351,17 +355,20 @@ def build_dashboard(prom, loki):
         [{"refId": "A", "datasource": loki, "expr": '{app="crypto-agent"} | json', "queryType": "range"}],
         transformations=[{"id": "extractFields", "options": {"source": "Line"}},
                          {"id": "organize", "options": {"excludeByName": {
-                             "Line": True, "id": True, "tsNs": True, "labels": True, "labelTypes": True}}}],
+                             "Line": True, "id": True, "tsNs": True, "labels": True, "labelTypes": True,
+                             "traceID": True, "traceID (field)": True}}}],
         decimals=1))
     y += 9
     model_fields = (("exemples", "Exemples"), ("gagnants", "Gagnants"), ("reel", "Réel"), ("net_moyen", "Net moyen (pb)"),
                     ("validation_bps", "Validation (pb)"), ("valide", "Trade réel autorisé"))
     panels.append(panel(
         "table", "Ce que l'agent a appris (une ligne par variante)", (0, y, 24, 12),
-        [target(f"agent_modele_{f}", instant=True, fmt="table", ref=chr(65 + i)) for i, (f, _) in enumerate(model_fields)],
+        # « max by » retire les étiquettes techniques (__name__…) : les 6 requêtes fusionnent en une ligne par variante.
+        [target(f"max by (variante, strategie) (agent_modele_{f})", instant=True, fmt="table", ref=chr(65 + i))
+         for i, (f, _) in enumerate(model_fields)],
         transformations=[{"id": "merge", "options": {}},
                          {"id": "organize", "options": {
-                             "excludeByName": {"Time": True, "instance": True, "job": True},
+                             "excludeByName": {"Time": True, "instance": True, "job": True, "__proxy_source__": True},
                              "renameByName": {f"Value #{chr(65 + i)}": label for i, (_, label) in enumerate(model_fields)}
                              | {"variante": "Variante", "strategie": "Stratégie"}}}],
         decimals=2))

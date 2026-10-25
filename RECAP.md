@@ -1,6 +1,6 @@
 # Récapitulatif du projet crypto-agent
 
-**État au 25/10/2026, 10:55 (heure de Paris, heure d'hiver depuis cette nuit).**
+**État au 25/10/2026, 15:05 (heure de Paris, heure d'hiver depuis cette nuit).**
 Ce document est la référence de travail. Le mettre à jour (date et heure en tête) après chaque étape importante, plutôt que de relire tout le code ou tout l'historique.
 
 ---
@@ -20,6 +20,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | Dépendances | `requirements.txt` (ccxt 4.5.85), `requirements-dev.txt` (+ ruff 0.17.0) |
 | CLI GitHub | `~/.local/bin/gh` 2.102.0, connecté au compte **Zboolbi**. Identité des commits : `ZBooBli <102283985+Zboolbi@users.noreply.github.com>`. |
 | Tableau de bord | **Grafana local http://localhost:3000** (depuis le 25/10 10:47), lecture sans connexion ; admin dans `.env` (`GRAFANA_ADMIN_PASSWORD`). L'ancien tableau Python (port 8050) n'est plus en service. |
+| **Grafana Cloud** | Pile **regalmeerkat2998** (essai gratuit jusqu'au 08/11/2026), tableau de bord **https://regalmeerkat2998.grafana.net/d/crypto-agent/crypto-agent** (connexion au compte requise). Données envoyées depuis le Mac par `grafana_cloud.py` (service `com.cryptoagent.grafana-cloud`, toutes les 15 s) : métriques Influx → Prometheus `grafanacloud-prom` (utilisateur 3707351), trades → Loki `grafanacloud-logs` (utilisateur 1849340). Identifiants dans `.env` (`GRAFANA_CLOUD_*`, saisis par l'utilisateur). Compte de service `crypto-agent` (Editor) : droits limités à certains dossiers, il ne peut pas relire le tableau qu'il publie (normal). |
 | Grafana | OSS 13.2.3 dans `~/.local/share/crypto-grafana/` (binaire, données, greffon SQLite 4.0.6, `crypto-agent.ini`) ; installé par `grafana/installer_grafana.sh` (SHA-256 vérifiés). |
 
 ## 3. Fichiers du code (~5 200 lignes, 39 tests)
@@ -35,6 +36,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | `dashboard.py` / `dashboard.html` | Tableau de bord temps réel façon Grafana (bibliothèque standard uniquement). Depuis le 25/10 10:14 : **colonnes distinctes court terme / long terme** (synthèse, résultat de chaque trade, positions ouvertes, derniers trades) ; la stratégie est déduite du nom du profil (`scalp_profils_longs`). |
 | `metriques.py` | Export toutes les 5 s vers `donnees/agent.db` (SQLite, 30 jours) : tables `valeurs`, `sante`, `trades`, `positions`, `modeles`. Lu par Grafana. |
 | `grafana/` | `installer_grafana.sh`, `provisioning/` (source « Agent crypto », uid `agent-sqlite`, et dossier des tableaux), `generer_tableau.py` → `tableaux/agent.json` (uid `crypto-agent`, 25 panneaux). |
+| `grafana_cloud.py` | Envoi vers Grafana Cloud (`cles`, `tester`, `tableau`, `lancer`). Le tableau Cloud est généré dans ce fichier (`build_dashboard`) puis publié par l'API : relancer `grafana_cloud.py tableau` après modification. |
 | `analyse.py` | Comparaison des 3 stratégies depuis un point de départ (`point-de-depart`, puis `analyse`). La tendance est lue dans `etat_tendance_papier.json` (latent compris). |
 | `pyproject.toml` | Métadonnées et règles ruff du projet (`.venv/bin/ruff check .`). Outils de développement : ruff 0.17.0 et vulture 2.16 (code mort). |
 | `installer_service.sh` / `desinstaller_service.sh` | Services launchd. |
@@ -91,6 +93,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | 25/10 10:05 | **Stratégie longue ajoutée** (30 s à 10 min) en parallèle du scalping court. | À 10:07 : 77 trades d'exploration, 48 % gagnants, −45,16 $. |
 | 25/10 10:19 | **Diagnostic** : 100 % des pertes viennent de l'exploration (variantes tirées au hasard) ; gain espéré théorique faux (validation des variantes « choisies » entre −9 et −27 pb) ; modèles longs trop confiants. Correction : décision sur le gain net calibré + exploration ciblée + validation remise à zéro. | Avant (09:57–10:19) : 121 trades, 46 % gagnants, −80,85 $, −7,9 pb/trade. Après (10:20–10:36) : 75 trades, 47 %, −40,00 $, −6,6 pb/trade. Seuils d'exploration resserrés à 10:40. |
 | 25/10 10:05–10:53 | Bilan de l'observation de 45 min (mélange avant/après les corrections de 10:20 et 10:40). | Court : 150 trades, 45 % gagnants, −84,89 $, −7,9 pb. Long : 43 trades, 33 %, −57,72 $, −13,6 pb ; seul cinq_min est légèrement positif (+1,14 $ sur 8 trades). Presque tout en exploration. Scalping à 9 819 $ (−1,81 %). |
+| 25/10 15:00 | **Mise en ligne sur Grafana Cloud** : informations de la pile relevées dans le Chrome de l'utilisateur (avec son accord), jetons saisis par lui (deux saisies ratées : jeton collé plusieurs fois, puis compte de service sans rôle, réglé en Editor). Envoi actif ; 15 panneaux vérifiés (0 erreur) et contrôlés visuellement. | Le Mac doit rester allumé pour que les données s'actualisent. |
 | 25/10 10:47 | **Bascule sur Grafana local** à la demande de l'utilisateur (refus de Grafana Cloud). Export SQLite, provisionnement, 20 panneaux vérifiés via l'API (0 erreur) et visuellement. | 49 tests. |
 | 25/10 10:35 | **Revue du code** : code mort retiré (`calibrated()`, métriques `accuracy`/`brier`, `expected()` → `payoff()`) ; 131 corrections ruff (f-strings) ; `pyproject.toml`. Tendance : état temps réel et plafonds 10 %/25 % (`tendance_*`). Tableau de bord : panneaux tendance et financement. Données papier archivées retirées du dépôt. | Commits poussés sur GitHub à la demande de l'utilisateur. |
 | 25/10 10:08 | Prolongation de la durée max ; à 10:14, tableau de bord séparé court/long. | À 10:14 : court 91 trades (−50,72 $ d'exploration), long 11 trades, 27 % gagnants, −30,25 $. Tout est encore de l'exploration. |

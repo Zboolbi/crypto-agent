@@ -31,6 +31,7 @@ class FakeCloud(BaseHTTPRequestHandler):
         if self.path == "/api/datasources" and self.headers["Authorization"] == "Bearer sa-test":
             body = [{"type": "prometheus", "name": "grafanacloud-x-prom", "uid": "prom1"},
                     {"type": "prometheus", "name": "grafanacloud-x-usage-insights", "uid": "usage"},
+                    {"type": "loki", "name": "grafanacloud-x-alert-state-history", "uid": "alerts"},
                     {"type": "loki", "name": "grafanacloud-x-logs", "uid": "loki1"}]
             return self._reply(200, json.dumps(body).encode())
         return self._reply(401)
