@@ -61,8 +61,8 @@ class CloudTest(unittest.TestCase):
         self.db_path = os.path.join(d, "agent.db")
         db = sqlite3.connect(self.db_path)
         db.executescript(metriques.SCHEMA)
-        db.execute("INSERT INTO valeurs VALUES (100, 'total', 29900, 30000, -50, -50, 10, 4)")
-        db.execute("INSERT INTO valeurs VALUES (100, 'scalping', 9900, 10000, -100, 0, 10, 4)")
+        db.execute("INSERT INTO valeurs VALUES (100, 'total', 29900, 30000, -50, -50, 10, 4, 25000)")
+        db.execute("INSERT INTO valeurs VALUES (100, 'scalping', 9900, 10000, -100, 0, 10, 4, 7500)")
         db.execute("INSERT INTO sante VALUES (100, 300, 200, 30, 0, 100, 5, 1000, 1, 1)")
         db.execute("INSERT INTO positions VALUES ('tendance', 'DOT', 'short', 'ouvert', 1000, 1, 1, 12.5, 100)")
         db.execute("INSERT INTO trades VALUES ('a', 2000000000, 'court', 'BTC', 'short', 'elan/eclair/limite', 1, 10, "
@@ -91,6 +91,10 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(paths, ["/api/v1/push/influx/write", "/loki/api/v1/push", "/api/dashboards/db"])
         influx = FakeCloud.received[0][2].decode()
         self.assertIn("agent_valeur,strategie=total valeur=29900.0,gain=-100.0", influx)
+        total = next(x for x in influx.splitlines() if x.startswith("agent_valeur,strategie=total"))
+        self.assertIn("disponible=25000.0", total)
+        self.assertIn("reussite_pct=40.0,echec_pct=60.0", total)  # 4 gagnants sur 10
+        self.assertIn("performance_pct=-0.333", total)
         self.assertIn("agent_position,crypto=DOT,etat=ouvert,strategie=tendance,variante=short", influx)
         self.assertEqual(FakeCloud.received[0][1], gc.basic("123", "tok-test"))
         loki = json.loads(FakeCloud.received[1][2])

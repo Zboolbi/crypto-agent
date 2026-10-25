@@ -30,7 +30,7 @@ DEFAULT_LONG_PROFILES = ("trente_s", "une_min", "cinq_min", "dix_min")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS valeurs (
     ts INTEGER NOT NULL, strategie TEXT NOT NULL, valeur REAL, depart REAL, realise REAL, latent REAL,
-    trades INTEGER, gagnants INTEGER, PRIMARY KEY (ts, strategie));
+    trades INTEGER, gagnants INTEGER, disponible REAL, PRIMARY KEY (ts, strategie));
 CREATE TABLE IF NOT EXISTS sante (
     ts INTEGER PRIMARY KEY, flux_msg_s REAL, retard_ms REAL, traitement_us REAL, reconnexions INTEGER,
     contrats INTEGER, fantomes_actifs INTEGER, exemples INTEGER, positions INTEGER, en_ligne INTEGER);
@@ -93,6 +93,9 @@ class Exporter:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db = sqlite3.connect(db_path)
         self.db.executescript(SCHEMA)
+        cols = {row[1] for row in self.db.execute("PRAGMA table_info(valeurs)")}
+        if "disponible" not in cols:  # base créée avant l'ajout des fonds disponibles
+            self.db.execute("ALTER TABLE valeurs ADD COLUMN disponible REAL")
         self.mode = mode
         self.last_purge = 0.0
 
@@ -104,7 +107,7 @@ class Exporter:
         trend = read_json(f"etat_tendance_{self.mode}.json")
         fund = read_json(f"etat_funding_{self.mode}.json")
         with self.db:
-            self._values(now, scalp, trend, fund)
+            self._values(now, scalp, trend, fund, cfg)
             self._health(now, scalp)
             self._positions(now, scalp, trend, fund)
             self._trades(longs)
@@ -115,24 +118,28 @@ class Exporter:
                     self.db.execute(f"DELETE FROM {table} WHERE ts < ?", (limit,))  # nom de table fixe, pas d'entrée externe
                 self.last_purge = now
 
-    def _values(self, now, scalp, trend, fund):
+    def _values(self, now, scalp, trend, fund, cfg):
+        """Une ligne par portefeuille, plus le total. « disponible » = valeur moins le capital immobilisé."""
         rows = []
         if scalp:
+            engaged = sum(p["notionnel"] for p in scalp.get("positions", []))  # positions et ordres en cours
             rows.append(("scalping", scalp["valeur"], scalp["capital_initial"], scalp["realise"], scalp["latent"],
-                         scalp["trades"], scalp["gagnants"]))
+                         scalp["trades"], scalp["gagnants"], max(0.0, scalp["valeur"] - engaged)))
         if trend:
+            # Positions à levier : seule la marge (taille / levier) est immobilisée.
+            margin = sum(p["notionnel"] for p in trend.get("positions", [])) / max(1.0, cfg.get("levier_max", 1.0))
             rows.append(("tendance", trend["valeur"], trend["capital_initial"], trend["realise"], trend["latent"],
-                         trend["trades"], trend["gagnants"]))
+                         trend["trades"], trend["gagnants"], max(0.0, trend["valeur"] - margin)))
         if fund:
             st = fund["stats"]
             latent = fund["valeur"] - fund["capital_initial"] - st["pnl"]  # positions ouvertes, financement compris
             rows.append(("financement", fund["valeur"], fund["capital_initial"], st["pnl"], latent,
-                         st["trades"], st["gagnants"]))
+                         st["trades"], st["gagnants"], fund["cash"]))
         if rows:
-            total = [sum(r[i] for r in rows) for i in range(1, 7)]
+            total = [sum(r[i] for r in rows) for i in range(1, 8)]
             rows.append(("total", *total))
-        self.db.executemany("INSERT OR REPLACE INTO valeurs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                            [(now, *r) for r in rows])
+        self.db.executemany("INSERT OR REPLACE INTO valeurs (ts, strategie, valeur, depart, realise, latent, trades, "
+                            "gagnants, disponible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [(now, *r) for r in rows])
 
     def _health(self, now, scalp):
         if not scalp:

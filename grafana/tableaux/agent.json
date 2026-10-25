@@ -427,7 +427,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 5,
+    "y": 10,
     "w": 16,
     "h": 9
    },
@@ -548,7 +548,7 @@
    },
    "gridPos": {
     "x": 16,
-    "y": 5,
+    "y": 10,
     "w": 8,
     "h": 9
    },
@@ -596,7 +596,7 @@
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 14,
+    "y": 19,
     "w": 24,
     "h": 1
    }
@@ -612,7 +612,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 15,
+    "y": 20,
     "w": 12,
     "h": 4
    },
@@ -693,7 +693,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 19,
+    "y": 24,
     "w": 12,
     "h": 8
    },
@@ -764,7 +764,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 27,
+    "y": 32,
     "w": 12,
     "h": 6
    },
@@ -871,7 +871,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 15,
+    "y": 20,
     "w": 12,
     "h": 4
    },
@@ -952,7 +952,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 19,
+    "y": 24,
     "w": 12,
     "h": 8
    },
@@ -1023,7 +1023,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 27,
+    "y": 32,
     "w": 12,
     "h": 6
    },
@@ -1126,7 +1126,7 @@
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 33,
+    "y": 38,
     "w": 24,
     "h": 1
    }
@@ -1142,7 +1142,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 34,
+    "y": 39,
     "w": 12,
     "h": 8
    },
@@ -1249,7 +1249,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 34,
+    "y": 39,
     "w": 12,
     "h": 8
    },
@@ -1352,7 +1352,7 @@
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 42,
+    "y": 47,
     "w": 24,
     "h": 1
    }
@@ -1368,7 +1368,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 43,
+    "y": 48,
     "w": 24,
     "h": 9
    },
@@ -1529,7 +1529,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 52,
+    "y": 57,
     "w": 12,
     "h": 8
    },
@@ -1605,7 +1605,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 52,
+    "y": 57,
     "w": 12,
     "h": 8
    },
@@ -1660,7 +1660,7 @@
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 60,
+    "y": 65,
     "w": 24,
     "h": 1
    }
@@ -1676,7 +1676,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 61,
+    "y": 66,
     "w": 24,
     "h": 12
    },
@@ -1865,6 +1865,353 @@
        {
         "id": "decimals",
         "value": 1
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 26,
+   "type": "stat",
+   "title": "Fonds disponibles",
+   "description": "Valeur des trois portefeuilles moins le capital immobilisé dans les positions ouvertes (taille pour le scalping, marge pour la tendance, trésorerie pour le financement).",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 5,
+    "w": 4,
+    "h": 5
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT disponible AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT disponible AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5794F2"
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 27,
+   "type": "stat",
+   "title": "Performance",
+   "description": "Gain ou perte total rapporté au capital de départ.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 5,
+    "w": 4,
+    "h": 5
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT 100.0 * (valeur - depart) / depart AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT 100.0 * (valeur - depart) / depart AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "percent",
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 28,
+   "type": "stat",
+   "title": "Taux de réussite",
+   "description": "Part des trades fermés gagnants, frais compris.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 5,
+    "w": 4,
+    "h": 5
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT 100.0 * gagnants / MAX(trades, 1) AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT 100.0 * gagnants / MAX(trades, 1) AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#FF9830",
+        "value": 50
+       },
+       {
+        "color": "#73BF69",
+        "value": 55
+       }
+      ]
+     },
+     "unit": "percent",
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 29,
+   "type": "stat",
+   "title": "Taux d'échec",
+   "description": "Part des trades fermés perdants ou nuls.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 5,
+    "w": 4,
+    "h": 5
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT 100.0 * (trades - gagnants) / MAX(trades, 1) AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT 100.0 * (trades - gagnants) / MAX(trades, 1) AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#73BF69",
+        "value": null
+       },
+       {
+        "color": "#FF9830",
+        "value": 45
+       },
+       {
+        "color": "#F2495C",
+        "value": 50
+       }
+      ]
+     },
+     "unit": "percent",
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 30,
+   "type": "table",
+   "title": "Par stratégie",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 5,
+    "w": 8,
+    "h": 5
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT strategie AS \"Stratégie\", ROUND(100.0 * (valeur - depart) / depart, 2) AS \"Performance (%)\", ROUND(100.0 * gagnants / MAX(trades, 1), 1) AS \"Réussite (%)\", ROUND(100.0 * (trades - gagnants) / MAX(trades, 1), 1) AS \"Échec (%)\", ROUND(disponible, 2) AS \"Disponible ($)\" FROM valeurs WHERE ts = (SELECT MAX(ts) FROM valeurs) AND strategie != 'total'",
+     "queryText": "SELECT strategie AS \"Stratégie\", ROUND(100.0 * (valeur - depart) / depart, 2) AS \"Performance (%)\", ROUND(100.0 * gagnants / MAX(trades, 1), 1) AS \"Réussite (%)\", ROUND(100.0 * (trades - gagnants) / MAX(trades, 1), 1) AS \"Échec (%)\", ROUND(disponible, 2) AS \"Disponible ($)\" FROM valeurs WHERE ts = (SELECT MAX(ts) FROM valeurs) AND strategie != 'total'",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Performance (%)"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Disponible ($)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 2
        }
       ]
      }

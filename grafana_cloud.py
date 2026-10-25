@@ -136,11 +136,15 @@ def collect_lines(db, now_ns):
     """Dernier état de chaque table → lignes Influx (une métrique Prometheus par champ)."""
     out = []
     last_ts = db.execute("SELECT MAX(ts) FROM valeurs").fetchone()[0]
-    for strat, valeur, depart, realise, latent, trades, gagnants in db.execute(
-            "SELECT strategie, valeur, depart, realise, latent, trades, gagnants FROM valeurs WHERE ts = ?", (last_ts,)):
+    for strat, valeur, depart, realise, latent, trades, gagnants, dispo in db.execute(
+            "SELECT strategie, valeur, depart, realise, latent, trades, gagnants, disponible FROM valeurs WHERE ts = ?",
+            (last_ts,)):
+        rate = 100.0 * gagnants / trades if trades else None
         out.append(line("agent_valeur", {"strategie": strat},
                         {"valeur": valeur, "gain": valeur - depart, "realise": realise, "latent": latent,
-                         "trades": trades, "gagnants": gagnants}, now_ns))
+                         "trades": trades, "gagnants": gagnants, "disponible": dispo,
+                         "performance_pct": 100.0 * (valeur - depart) / depart if depart else None,
+                         "reussite_pct": rate, "echec_pct": 100.0 - rate if rate is not None else None}, now_ns))
     row = db.execute("SELECT flux_msg_s, retard_ms, traitement_us, reconnexions, contrats, fantomes_actifs, "
                      "exemples, positions, en_ligne, ts FROM sante ORDER BY ts DESC LIMIT 1").fetchone()
     if row:
@@ -372,6 +376,48 @@ def build_dashboard(prom, loki):
                              "renameByName": {f"Value #{chr(65 + i)}": label for i, (_, label) in enumerate(model_fields)}
                              | {"variante": "Variante", "strategie": "Stratégie"}}}],
         decimals=2))
+    # Seconde rangée : fonds disponibles, performance, réussite, échec et détail par stratégie.
+    for p in panels:
+        if p["gridPos"]["y"] >= 4:
+            p["gridPos"]["y"] += 5
+    orange = "#FF9830"
+
+    def rate(title, x, expr, steps, desc):
+        p = panel("stat", title, (x, 4, 4, 5), [target(expr, instant=True)], unit="percent", decimals=1,
+                  steps={"mode": "absolute", "steps": steps},
+                  options={"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "area", "colorMode": "value"})
+        p["description"] = desc
+        return p
+
+    dispo = panel("stat", "Fonds disponibles", (0, 4, 4, 5), [target(g("total", "disponible"), instant=True)],
+                  unit="currencyUSD", color=blue,
+                  options={"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "area", "colorMode": "value"})
+    dispo["description"] = ("Valeur des trois portefeuilles moins le capital immobilisé dans les positions ouvertes "
+                            "(taille pour le scalping, marge pour la tendance, trésorerie pour le financement).")
+    panels += [
+        dispo,
+        rate("Performance", 4, g("total", "performance_pct"),
+             [{"color": red, "value": None}, {"color": green, "value": 0}],
+             "Gain ou perte total rapporté au capital de départ des trois portefeuilles."),
+        rate("Taux de réussite", 8, g("total", "reussite_pct"),
+             [{"color": red, "value": None}, {"color": orange, "value": 50}, {"color": green, "value": 55}],
+             "Part des trades fermés gagnants, frais compris (toutes stratégies, depuis le lancement)."),
+        rate("Taux d'échec", 12, g("total", "echec_pct"),
+             [{"color": green, "value": None}, {"color": orange, "value": 45}, {"color": red, "value": 50}],
+             "Part des trades fermés perdants ou nuls, frais compris."),
+        panel("table", "Par stratégie", (16, 4, 8, 5), [
+            target("max by (strategie) (agent_valeur_performance_pct)", instant=True, fmt="table", ref="A"),
+            target("max by (strategie) (agent_valeur_reussite_pct)", instant=True, fmt="table", ref="B"),
+            target("max by (strategie) (agent_valeur_echec_pct)", instant=True, fmt="table", ref="C"),
+            target("max by (strategie) (agent_valeur_disponible)", instant=True, fmt="table", ref="D")],
+              decimals=1,
+              transformations=[{"id": "merge", "options": {}},
+                               {"id": "organize", "options": {
+                                   "excludeByName": {"Time": True},
+                                   "renameByName": {"strategie": "Stratégie", "Value #A": "Performance (%)",
+                                                    "Value #B": "Réussite (%)", "Value #C": "Échec (%)",
+                                                    "Value #D": "Disponible ($)"}}}]),
+    ]
     return {"uid": "crypto-agent", "title": "Crypto Agent", "tags": ["crypto", "agent"], "timezone": "browser",
             "refresh": "30s", "time": {"from": "now-6h", "to": "now"}, "schemaVersion": 39, "panels": panels,
             "description": "Agent de trading crypto en mode papier : données envoyées depuis le Mac (grafana_cloud.py)."}

@@ -214,6 +214,30 @@ def build():
                    *[unit_of(f, "none", 1) for f in ("Gagnants (%)", "Annoncé (%)", "Réel (%)", "Net moyen (pb)",
                                                       "Ordres limite exécutés (%)", "Validation (pb)")]]))
 
+    # Seconde rangée : fonds disponibles, performance, réussite, échec et détail par stratégie.
+    for p in panels:
+        if p["gridPos"]["y"] >= 5:
+            p["gridPos"]["y"] += 5
+    rate_steps_up = [{"color": RED, "value": None}, {"color": ORANGE, "value": 50}, {"color": GREEN, "value": 55}]
+    rate_steps_down = [{"color": GREEN, "value": None}, {"color": ORANGE, "value": 45}, {"color": RED, "value": 50}]
+    panels += [
+        stat("Fonds disponibles", (0, 5, 4, 5), latest("total", "disponible"), fixed=BLUE,
+             desc="Valeur des trois portefeuilles moins le capital immobilisé dans les positions ouvertes "
+                  "(taille pour le scalping, marge pour la tendance, trésorerie pour le financement)."),
+        stat("Performance", (4, 5, 4, 5), latest("total", "100.0 * (valeur - depart) / depart"), unit="percent",
+             steps=PNL_STEPS, decimals=1, desc="Gain ou perte total rapporté au capital de départ."),
+        stat("Taux de réussite", (8, 5, 4, 5), latest("total", "100.0 * gagnants / MAX(trades, 1)"), unit="percent",
+             steps=rate_steps_up, decimals=1, desc="Part des trades fermés gagnants, frais compris."),
+        stat("Taux d'échec", (12, 5, 4, 5), latest("total", "100.0 * (trades - gagnants) / MAX(trades, 1)"),
+             unit="percent", steps=rate_steps_down, decimals=1, desc="Part des trades fermés perdants ou nuls."),
+        panel("table", "Par stratégie", (16, 5, 8, 5),
+              "SELECT strategie AS \"Stratégie\", ROUND(100.0 * (valeur - depart) / depart, 2) AS \"Performance (%)\", "
+              "ROUND(100.0 * gagnants / MAX(trades, 1), 1) AS \"Réussite (%)\", "
+              "ROUND(100.0 * (trades - gagnants) / MAX(trades, 1), 1) AS \"Échec (%)\", "
+              "ROUND(disponible, 2) AS \"Disponible ($)\" FROM valeurs WHERE ts = (SELECT MAX(ts) FROM valeurs) "
+              "AND strategie != 'total'",
+              overrides=[pnl_color("Performance (%)"), unit_of("Disponible ($)", "currencyUSD")]),
+    ]
     return {"uid": "crypto-agent", "title": "Crypto Agent", "tags": ["crypto", "agent"], "timezone": "browser",
             "refresh": "5s", "time": {"from": "now-6h", "to": "now"}, "schemaVersion": 39, "version": 1,
             "editable": False, "graphTooltip": 1, "panels": panels,
