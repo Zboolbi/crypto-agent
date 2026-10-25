@@ -232,14 +232,33 @@ class Pusher:
 # --------------------------------------------------------------------------- #
 
 
+DEFAULT_SOURCES = ({"type": "prometheus", "uid": "grafanacloud-prom"}, {"type": "loki", "uid": "grafanacloud-logs"})
+
+
 def datasources(env):
+    """Sources Prometheus et Loki de la pile. Si le jeton (rôle Editor) ne peut pas les lister,
+    on utilise les identifiants standard de Grafana Cloud."""
     auth = "Bearer " + env["GRAFANA_CLOUD_SA_TOKEN"]
-    sources = request(env["GRAFANA_CLOUD_URL"] + "/api/datasources", auth=auth)
+    try:
+        sources = request(env["GRAFANA_CLOUD_URL"] + "/api/datasources", auth=auth)
+    except CloudError as e:
+        if "HTTP 403" not in str(e):
+            raise
+        return DEFAULT_SOURCES
     prom = next((d for d in sources if d["type"] == "prometheus" and "usage" not in d["name"].lower()), None)
     loki = next((d for d in sources if d["type"] == "loki" and "usage" not in d["name"].lower()), None)
     if not prom or not loki:
         raise CloudError("Sources Prometheus ou Loki introuvables dans la pile Grafana Cloud.")
     return {"type": "prometheus", "uid": prom["uid"]}, {"type": "loki", "uid": loki["uid"]}
+
+
+def check_query(env, prom):
+    """Exécute une requête sur la source Prometheus : prouve qu'elle existe et reçoit nos données."""
+    now = int(time.time() * 1000)
+    body = {"queries": [{"refId": "A", "datasource": prom, "expr": "agent_sante_flux_msg_s", "instant": True,
+                         "range": False}], "from": str(now - 600000), "to": str(now)}
+    res = request(env["GRAFANA_CLOUD_URL"] + "/api/ds/query", body, "Bearer " + env["GRAFANA_CLOUD_SA_TOKEN"])
+    return len(res["results"]["A"].get("frames", []))
 
 
 def build_dashboard(prom, loki):
@@ -373,7 +392,8 @@ def main():
             print(f"Métriques envoyées : {pusher.push_metrics()} séries")
             print(f"Trades envoyés : {pusher.push_trades()}")
             prom, loki = datasources(env)
-            print(f"API de la pile : OK (Prometheus {prom['uid']}, Loki {loki['uid']})")
+            n = check_query(env, prom)
+            print(f"API de la pile : OK (Prometheus {prom['uid']} : {n} série(s) agent_sante lues, Loki {loki['uid']})")
         elif args.cmd == "tableau":
             print("Tableau de bord publié :", publish_dashboard(env))
         else:
