@@ -1,6 +1,6 @@
 # Récapitulatif du projet crypto-agent
 
-**État au 25/10/2026, 10:08 (heure de Paris, heure d'hiver depuis cette nuit).**
+**État au 25/10/2026, 10:15 (heure de Paris, heure d'hiver depuis cette nuit).**
 Ce document est la référence de travail. Le mettre à jour (date et heure en tête) après chaque étape importante, plutôt que de relire tout le code ou tout l'historique.
 
 ---
@@ -31,7 +31,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | `scalper.py` | Stratégie **scalping**. Voir § 5. |
 | `learner.py` | Régression logistique en ligne, calibrage par tranches, garde-fou face à l'inconnu (plus de 4 écarts-types). |
 | `funding.py` | **Arbitrage de financement** : achat au comptant et vente du perpétuel, backtest sur l'historique réel des taux, moteur papier. |
-| `dashboard.py` / `dashboard.html` | Tableau de bord temps réel façon Grafana (bibliothèque standard uniquement). |
+| `dashboard.py` / `dashboard.html` | Tableau de bord temps réel façon Grafana (bibliothèque standard uniquement). Depuis le 25/10 10:14 : **colonnes distinctes court terme / long terme** (synthèse, résultat de chaque trade, positions ouvertes, derniers trades) ; la stratégie est déduite du nom du profil (`scalp_profils_longs`). |
 | `analyse.py` | Comparaison des 3 stratégies depuis un point de départ (`point-de-depart`, puis `analyse`). |
 | `installer_service.sh` / `desinstaller_service.sh` | Services launchd. |
 | `tests/` | `test_core.py`, `test_dashboard.py`, `test_funding.py`. |
@@ -62,6 +62,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 5 bis. **Deux stratégies en parallèle (depuis le 25/10 10:05)**, positions indexées par (contrat, stratégie) :
    - **court** : les 4 profils ci-dessus, familles élan et rebond, **15 % du capital engagés au plus** ;
    - **longue** : profils trente_s (30/25 pb, 30 s), une_min (45/35 pb, 1 min), cinq_min (90/60 pb, 5 min) et dix_min (140/90 pb, 10 min) ; familles élan, rebond et **tendance** (score 15 min ≤ −40 et pression vendeuse) ; **10 % engagés au plus** ; fantômes au plus toutes les 10 s par crypto. Réglages `longue_*` et `scalp_profils_longs`.
+5 ter. **Prolongation de la durée max (depuis le 25/10 10:08)** : à l'échéance, une position perdante après frais est prolongée de sa durée initiale (2 fois au plus) si le flux ne va pas nettement contre elle et si sa perte reste sous 50 % de la distance au stop. Le stop reste actif. Réglages `scalp_prolongation*`. La raison de sortie devient « durée max (prolongée ×N) ».
 6. **Trade réel décidé par le modèle** seulement si :
    - le modèle est prêt (200 exemples) ;
    - **la variante est validée hors échantillon** : ses 50 derniers trades fantômes « que le modèle aurait pris » gagnent plus de 1 pb net en moyenne ;
@@ -82,6 +83,7 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | 25/10 08:22–09:57 | Cycle 3, avec la validation hors échantillon | **0 trade de scalping** : aucune variante validée, budget d'exploration du jour épuisé. Cycle interrompu. |
 | 25/10 09:57 | **Nouvelle session** (`scalper.py nouvelle-session`) : portefeuille neuf à 10 000 $, modèles et validation conservés. Plafonds : 10 % par trade, 25 % engagés, budget d'exploration 25 %/jour. | Ancien journal archivé en `*.session-20261025-0957`. |
 | 25/10 10:05 | **Stratégie longue ajoutée** (30 s à 10 min) en parallèle du scalping court. | À 10:07 : 77 trades d'exploration, 48 % gagnants, −45,16 $. |
+| 25/10 10:08 | Prolongation de la durée max ; à 10:14, tableau de bord séparé court/long. | À 10:14 : court 91 trades (−50,72 $ d'exploration), long 11 trades, 27 % gagnants, −30,25 $. Tout est encore de l'exploration. |
 
 **Soldes à 10:07** : scalping 9 954,84 $ (nouvelle session à 10 000 $ depuis 09:57) ; tendance 9 699,53 $ (3 shorts ouverts depuis 01:15 : DOT, AAVE, JUP) ; financement 9 995,08 $ (1 position INIT à environ 11 %/an, +0,20 $ encaissés).
 
@@ -103,6 +105,8 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 - Refusé : se connecter à son compte ChatGPT (identifiants d'un autre service). Hors périmètre : modifier les réglages de sécurité macOS (accès complet au disque).
 - Il demande des cycles de test de 4 h, puis analyse, optimisation et nouveau cycle, jusqu'à de nouvelles consignes.
 - 25/10 09:50 : il veut que chaque position soit au moins gagnante, frais compris. Fait établi : un objectif atteint l'est toujours ; seuls le stop, la durée maximale et le flux inversé peuvent fermer en perte. **Question en attente** : bloquer les sorties en perte autres que le stop (durée maximale et flux inversé ne fermeraient plus en perte) ? Le stop doit rester.
+- 25/10 10:08 : « dernière règle », prolonger la durée max d'une position perdante qui peut redevenir gagnante. C'est fait (§ 5 ter).
+- 25/10 10:12 : tableau de bord avec des panneaux distincts pour les positions courtes et longues. C'est fait.
 - 25/10 10:00 : il veut deux stratégies en parallèle, le scalping actuel (« très bien ») et des positions plus longues (30 s à 10 min) avec de plus gros gains. C'est fait.
 
 ## 9. Points ouverts et pistes

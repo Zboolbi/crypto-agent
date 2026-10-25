@@ -44,6 +44,15 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(out["stats"]["raisons"], {"objectif": 1, "stop": 1})
         self.assertAlmostEqual(out["stats"]["esperance_bps"], (16 - 27) / 2)
 
+    def test_trades_split_by_strategy(self):
+        with open(os.path.join(self.tmp.name, "journal_scalp_papier.csv"), "a") as f:
+            f.write("2026-10-25 00:02:00,SOL,short,explo:elan/cinq_min/marche,0.5,100,99,1000,300,100,93,9.3,objectif\n")
+        out = dashboard.build("papier", 3600, base=self.tmp.name)
+        court, longue = out["strategies"]["court"], out["strategies"]["longue"]
+        self.assertEqual((court["total"]["trades"], longue["total"]["trades"]), (2, 1))
+        self.assertEqual(longue["total"]["exploration"], 1)
+        self.assertAlmostEqual(longue["total"]["pnl"], 9.3)
+
     def test_missing_files_are_reported_not_fatal(self):
         out = dashboard.build("testnet", 3600, base=self.tmp.name)
         self.assertFalse(out["en_ligne"])

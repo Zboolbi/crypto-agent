@@ -60,6 +60,14 @@
   .bar { height: 6px; background: var(--panel-hi); border-radius: 1px; overflow: hidden; min-width: 60px; }
   .bar i { display: block; height: 100%; }
   .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .strat h3 { font-size: 13px; }
+  .strat.court { border-top: 2px solid var(--blue); }
+  .strat.longue { border-top: 2px solid var(--purple); }
+  .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .kpis div { background: var(--panel-hi); padding: 6px 8px; border-radius: 2px; min-width: 0; }
+  .kpis b { display: block; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .kpis span { color: var(--muted); font-size: 11px; }
+  @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   #tip { position: fixed; z-index: 20; display: none; pointer-events: none; background: var(--panel-hi);
          border: 1px solid var(--border); padding: 6px 8px; font-size: 12px; line-height: 1.5; border-radius: 2px;
          box-shadow: 0 4px 12px rgba(0, 0, 0, .4); }
@@ -95,12 +103,20 @@
   <section class="panel s16"><h3>Valeur du portefeuille <small id="curveInfo"></small></h3><canvas id="cCurve"></canvas></section>
   <section class="panel s8"><h3>Santé de l'agent</h3><div class="kv" id="health"></div></section>
 
-  <section class="panel s12"><h3>Résultat de chaque trade <small>100 derniers, en $</small></h3><canvas id="cTrades"></canvas></section>
-  <section class="panel s6"><h3>Raisons de sortie</h3><canvas id="cReasons"></canvas></section>
-  <section class="panel s6"><h3>Cryptos <small>résultat moyen appris, pb</small></h3><canvas id="cCryptos"></canvas></section>
+  <section class="panel s12 strat court"><h3>⚡ Court terme <small>scalping, 20 s à 3 min · 15 % du capital engagés au plus</small></h3><div class="kpis" id="kpi_court"></div></section>
+  <section class="panel s12 strat longue"><h3>⏱ Long terme <small>30 s à 10 min · 10 % du capital engagés au plus</small></h3><div class="kpis" id="kpi_longue"></div></section>
 
-  <section class="panel s10"><h3>Positions ouvertes</h3><div class="scroll" id="positions"></div></section>
-  <section class="panel s14"><h3>Derniers trades</h3><div class="scroll" id="trades"></div></section>
+  <section class="panel s12 strat court"><h3>Court terme · résultat de chaque trade <small>100 derniers, en $</small></h3><canvas id="cTrades_court"></canvas></section>
+  <section class="panel s12 strat longue"><h3>Long terme · résultat de chaque trade <small>100 derniers, en $</small></h3><canvas id="cTrades_longue"></canvas></section>
+
+  <section class="panel s12 strat court"><h3>Court terme · positions ouvertes</h3><div class="scroll" id="positions_court"></div></section>
+  <section class="panel s12 strat longue"><h3>Long terme · positions ouvertes</h3><div class="scroll" id="positions_longue"></div></section>
+
+  <section class="panel s12 strat court"><h3>Court terme · derniers trades</h3><div class="scroll" id="trades_court"></div></section>
+  <section class="panel s12 strat longue"><h3>Long terme · derniers trades</h3><div class="scroll" id="trades_longue"></div></section>
+
+  <section class="panel s12"><h3>Raisons de sortie <small>les deux stratégies</small></h3><canvas id="cReasons"></canvas></section>
+  <section class="panel s12"><h3>Cryptos <small>résultat moyen appris, pb</small></h3><canvas id="cCryptos"></canvas></section>
 
   <section class="panel s24"><h3>Ce que l'agent a appris <small>une ligne par variante : famille / profil / type d'entrée</small></h3>
     <div class="scroll" id="models"></div>
@@ -186,9 +202,8 @@ function drawCurve() {
 }
 
 // ── Barres : résultat de chaque trade ─────────────────────────────────────────
-function drawTrades() {
-  const { cv, ctx, w, h } = canvas('cTrades', 200);
-  const tr = data.trades;
+function drawTrades(id, tr) {
+  const { cv, ctx, w, h } = canvas(id, 200);
   if (!tr.length) { ctx.fillStyle = C.muted; ctx.fillText('Aucun trade réel pour l’instant : l’agent n’en prend que si son espérance est positive.', 12, 24); cv.onmousemove = null; return; }
   const vals = tr.map(t => +t.pnl), L = 54, R = 6, T = 8, B = 8, pw = w - L - R, ph = h - T - B;
   const m = Math.max(1e-9, ...vals.map(Math.abs)), ticks = niceTicks(-m, m, 4), y0 = ticks[0], y1 = ticks[ticks.length - 1];
@@ -268,7 +283,8 @@ function render() {
   } else kv('Statut', 'aucune donnée : lancez l’agent', 'neg');
   $('health').innerHTML = H.join('');
 
-  drawCurve(); drawTrades();
+  drawCurve();
+  for (const g of ['court', 'longue']) renderStrategy(g, data.strategies[g]);
   const reasons = Object.entries(st.raisons).sort((a, b) => b[1] - a[1]);
   const rc = { objectif: C.green, stop: C.red, 'durée max': C.orange, 'flux inversé': C.purple };
   drawHBars('cReasons', reasons.map(([k, v]) => [k, v, k]), (v, k) => rc[k] || C.blue, v => nf(0).format(v));
@@ -276,28 +292,40 @@ function render() {
   drawHBars('cCryptos', cr.map(r => [r.crypto + (r.quarantaine_min > 0 ? ' ⏸' : ''), r.resultat_bps]),
             v => v >= 0 ? C.green : C.red, v => bps(v));
 
-  table('positions', [['Crypto'], ['Variante'], ['État'], ['Entrée', 'num'], ['Actuel', 'num'], ['P&L', 'num']],
-    (s ? s.positions : []).map(p => [td(`<b>${esc(p.crypto)}</b>`), td(`<span class="tag">${esc(p.variante)}</span>`),
-      td(p.etat === 'ouvert' ? 'ouverte' : 'ordre limite en attente', p.etat === 'ouvert' ? '' : 'mut'),
-      td(p.entree == null ? '—' : nf(p.entree < 1 ? 6 : 2).format(p.entree), 'num'),
-      td(p.actuel == null ? '—' : nf(p.actuel < 1 ? 6 : 2).format(p.actuel), 'num'),
-      td(p.pnl == null ? '—' : sUsd(p.pnl), 'num ' + cls(p.pnl))]),
-    'Aucune position ouverte.');
-
-  table('trades', [['Heure'], ['Crypto'], ['Variante'], ['Durée', 'num'], ['Proba', 'num'], ['Net', 'num'], ['P&L', 'num'], ['Sortie']],
-    tr.slice().reverse().map(t => [td(esc(t.date.slice(11)), 'mut'), td(`<b>${esc(t.crypto)}</b>`),
-      td(t.profil.startsWith('explo:') ? `<span class="tag" style="color:${C.blue}">exploration</span> <span class="tag">${esc(t.profil.slice(6))}</span>` : `<span class="tag">${esc(t.profil)}</span>`),
-      td(nf(1).format(+t.duree_s) + ' s', 'num'), td(pct(+t.proba), 'num'), td(bps(+t.net_bps), 'num ' + cls(+t.net_bps)),
-      td(sUsd(+t.pnl), 'num ' + cls(+t.pnl)), td(esc(t.raison), 'mut')]),
-    'Aucun trade réel pour l’instant.');
 
   const bar = (v, col) => `<div class="bar"><i style="width:${Math.round(Math.min(1, v || 0) * 100)}%;background:${col}"></i></div>`;
-  table('models', [['Variante'], ['Exemples', 'num'], ['Gagnants'], ['', 'num'], ['Annoncé → réel', 'num'], ['Ordres limite exécutés', 'num']],
-    data.modeles.map(m => [td(`<span class="tag">${esc(m.variante)}</span>`), td(nf(0).format(m.exemples), 'num'),
+  table('models', [['Stratégie'], ['Variante'], ['Exemples', 'num'], ['Gagnants'], ['', 'num'], ['Annoncé → réel', 'num'], ['Ordres limite exécutés', 'num']],
+    data.modeles.map(m => [td(m.strategie === 'longue' ? '⏱ long' : '⚡ court', 'mut'), td(`<span class="tag">${esc(m.variante)}</span>`), td(nf(0).format(m.exemples), 'num'),
       td(bar(m.gagnants, m.gagnants >= .5 ? C.green : C.red)), td(pct(m.gagnants), 'num'),
       td(m.annonce == null ? '—' : pct(m.annonce) + ' → <span class="' + (m.reel < m.annonce - .1 ? 'neg' : 'pos') + '">' + pct(m.reel) + '</span>', 'num'),
       td(m.execution == null ? '—' : pct(m.execution), 'num')]),
     'Aucun modèle entraîné pour l’instant.');
+}
+
+function renderStrategy(g, S) {
+  const T = S.total, rate = T.trades ? T.gagnants / T.trades : null, st = S.stats;
+  const kpi = (label, value, klass = '') => `<div><span>${label}</span><b class="${klass}">${value}</b></div>`;
+  $('kpi_' + g).innerHTML = [
+    kpi('Trades', nf(0).format(T.trades)),
+    kpi('Gagnants', pct(rate), rate == null ? '' : rate >= .5 ? 'pos' : 'neg'),
+    kpi('Résultat', sUsd(T.pnl), cls(T.pnl)),
+    kpi('Espérance / trade', bps(st.esperance_bps), cls(st.esperance_bps)),
+    kpi('Dont exploration', T.exploration + ' · ' + sUsd(T.exploration_pnl), cls(T.exploration_pnl)),
+  ].join('');
+  drawTrades('cTrades_' + g, S.trades);
+  table('positions_' + g, [['Crypto'], ['Variante'], ['État'], ['Entrée', 'num'], ['Actuel', 'num'], ['P&L', 'num']],
+    S.positions.map(p => [td(`<b>${esc(p.crypto)}</b>`), td(`<span class="tag">${esc(p.variante)}</span>`),
+      td(p.etat === 'ouvert' ? 'ouverte' : 'ordre en cours', p.etat === 'ouvert' ? '' : 'mut'),
+      td(p.entree == null ? '—' : nf(p.entree < 1 ? 6 : 2).format(p.entree), 'num'),
+      td(p.actuel == null ? '—' : nf(p.actuel < 1 ? 6 : 2).format(p.actuel), 'num'),
+      td(p.pnl == null ? '—' : sUsd(p.pnl), 'num ' + cls(p.pnl))]),
+    'Aucune position ouverte.');
+  table('trades_' + g, [['Heure'], ['Crypto'], ['Variante'], ['Durée', 'num'], ['Net', 'num'], ['P&L', 'num'], ['Sortie']],
+    S.trades.slice().reverse().map(t => [td(esc(t.date.slice(11)), 'mut'), td(`<b>${esc(t.crypto)}</b>`),
+      td(t.profil.startsWith('explo:') ? `<span class="tag" style="color:${C.blue}">exploration</span> <span class="tag">${esc(t.profil.slice(6))}</span>` : `<span class="tag">${esc(t.profil)}</span>`),
+      td(nf(1).format(+t.duree_s) + ' s', 'num'), td(bps(+t.net_bps), 'num ' + cls(+t.net_bps)),
+      td(sUsd(+t.pnl), 'num ' + cls(+t.pnl)), td(esc(t.raison), 'mut')]),
+    'Aucun trade pour l’instant.');
 }
 
 async function tick() {

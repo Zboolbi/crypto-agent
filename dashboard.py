@@ -25,6 +25,7 @@ PAGE = os.path.join(HERE, "dashboard.html")
 MAX_POINTS = 600   # points de courbe envoyés au navigateur
 MAX_TRADES = 300
 STALE_S = 15       # au-delà, l'agent est considéré arrêté
+DEFAULT_LONG_PROFILES = ("trente_s", "une_min", "cinq_min", "dix_min")
 
 
 def read_json(path):
@@ -83,14 +84,25 @@ def trade_stats(trades):
     }
 
 
-def models(state):
+def long_profiles(base):
+    """Noms des profils de la stratégie longue, lus dans la configuration effective."""
+    cfg = read_json(os.path.join(base, "config_trading.json")) or {}
+    return {p["nom"] for p in cfg.get("scalp_profils_longs", [])} or set(DEFAULT_LONG_PROFILES)
+
+
+def strategy_of(variant, longs):
+    parts = variant.replace("explo:", "").split("/")
+    return "longue" if len(parts) > 1 and parts[1] in longs else "court"
+
+
+def models(state, longs):
     rows = []
     for key, d in (state or {}).get("modeles", {}).items():
         m = OnlineLogit.from_dict(d)
         if not m.seen:
             continue
         said, real = m.calibration()
-        rows.append({"variante": key, "exemples": m.seen, "gagnants": m.base_rate, "annonce": said, "reel": real,
+        rows.append({"variante": key, "strategie": strategy_of(key, longs), "exemples": m.seen, "gagnants": m.base_rate, "annonce": said, "reel": real,
                      "execution": state.get("remplissage", {}).get(key) if key.endswith("limite") else None})
     rows.sort(key=lambda r: -r["gagnants"])
     return rows
@@ -109,9 +121,20 @@ def build(mode, window_s, base=HERE):
     path = lambda name: os.path.join(base, name.format(mode))  # noqa: E731
     live = read_json(path("etat_scalp_{}.json"))
     state = read_json(path("portefeuille_scalp_{}.json"))
-    trades = read_csv(path("journal_scalp_{}.csv"), MAX_TRADES)
+    trades = read_csv(path("journal_scalp_{}.csv"))
+    longs = long_profiles(base)
     since = time.time() - window_s if window_s else 0
     age = time.time() - live["maj"] if live else None
+    groups = {}
+    for g in ("court", "longue"):
+        rows = [t for t in trades if strategy_of(t.get("profil", ""), longs) == g]
+        positions = [p for p in (live or {}).get("positions", []) if p.get("strategie", "court") == g]
+        explo = [t for t in rows if t.get("profil", "").startswith("explo:")]
+        groups[g] = {"trades": rows[-100:], "stats": trade_stats(rows[-MAX_TRADES:]), "positions": positions,
+                     "total": {"trades": len(rows), "gagnants": sum(1 for t in rows if num(t["pnl"]) > 0),
+                               "pnl": sum(num(t["pnl"]) for t in rows), "exploration": len(explo),
+                               "exploration_pnl": sum(num(t["pnl"]) for t in explo)}}
+    trades = trades[-MAX_TRADES:]
     return {
         "maintenant": time.time(),
         "mode": mode,
@@ -121,7 +144,8 @@ def build(mode, window_s, base=HERE):
         "courbe": curve(path("courbe_scalp_{}.csv"), since),
         "trades": trades[-100:],
         "stats": trade_stats(trades),
-        "modeles": models(state),
+        "modeles": models(state, longs),
+        "strategies": groups,
         "cryptos": cryptos(state),
     }
 
