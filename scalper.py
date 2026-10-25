@@ -46,6 +46,8 @@ LONG_MS = 30000       # horizon de la baisse « 30 s » et de la volatilité
 STATUS_S = 30
 TREND_REFRESH_S = 300
 SHADOW_SPACING_MS = 1000  # au plus un groupe de fantômes par seconde, par crypto et par famille
+SHADOW_SPACING_LONG_MS = 10000  # positions longues : fantômes plus espacés (ils durent jusqu'à 10 min)
+GROUPS = ("court", "longue")    # deux stratégies en parallèle : scalping court et positions plus longues
 QUARANTINE_TRADES = 5     # trades réels examinés pour la quarantaine
 QUARANTINE_MS = 3600000   # durée de la quarantaine d'une crypto
 LIVE_FILE_S = 1           # fréquence d'écriture du solde temps réel
@@ -274,13 +276,17 @@ class Scalper:
         modes = {"limite": [True], "marche": [False]}.get(self.cfg["scalp_entree"], [True, False])
         # « elan » : short pendant une chute ; « rebond » : short après une poussée trop rapide.
         self.families = list(self.cfg["scalp_familles"]) + (["elan_long"] if self.cfg["scalp_long"] else [])
-        self.variants = [(f, p, m) for f in self.families for p in self.cfg["scalp_profils"] for m in modes]
+        self.variants = [(f, p, m, "court") for f in self.families for p in self.cfg["scalp_profils"] for m in modes]
+        if self.cfg["longue_active"]:
+            # Stratégie longue : 30 s à 10 min, objectifs plus grands, familles élan, rebond et tendance.
+            self.variants += [(f, p, m, "longue") for f in self.cfg["longue_familles"]
+                              for p in self.cfg["scalp_profils_longs"] for m in modes]
         self.models = {model_key(f, p, m): OnlineLogit.from_dict(self.state["modeles"].get(model_key(f, p, m)))
-                       for f, p, m in self.variants}
+                       for f, p, m, _ in self.variants}
         self.books, self.coins, self.trend, self.funding = {}, {}, {}, {}
         self.shadows = collections.defaultdict(list)
         self.last_shadow = {}
-        self.trades = {}   # trades réels en cours (attente ou ouvert), un par contrat
+        self.trades = {}   # trades réels en cours (attente ou ouvert), un par (contrat, stratégie)
         self.latencies = collections.deque(maxlen=2000)
         self.msgs = self.reconnects = self.n_shadows = 0
         self.proc_us = 0.0                     # temps de traitement moyen d'un message
@@ -438,9 +444,10 @@ class Scalper:
             return
         b.add_trade(t, price, -price * qty if seller_aggressor else price * qty, self.cfg["scalp_fenetre_s"] * 1000)
         self._step_shadows(c, lambda s: s.on_trade(t, price, qty, seller_aggressor, b))
-        real = self.trades.get(c)
-        if real:
-            self._step_real(c, real, t, lambda s: s.on_trade(t, price, qty, seller_aggressor, b))
+        for g in GROUPS:
+            real = self.trades.get((c, g))
+            if real:
+                self._step_real((c, g), real, t, lambda s: s.on_trade(t, price, qty, seller_aggressor, b))
         self.consider(c, t)
 
     def on_depth(self, c, t, bids, asks):
@@ -449,9 +456,10 @@ class Scalper:
             return
         b.set_depth(bids, asks)
         self._step_shadows(c, lambda s: s.on_book(t, b))
-        real = self.trades.get(c)
-        if real:
-            self._step_real(c, real, t, lambda s: s.on_book(t, b))
+        for g in GROUPS:
+            real = self.trades.get((c, g))
+            if real:
+                self._step_real((c, g), real, t, lambda s: s.on_book(t, b))
 
     def _step_shadows(self, c, step):
         alive = []
@@ -509,6 +517,9 @@ class Scalper:
                 self.evaluate(c, t, "elan", "short")
             if "rebond" in self.families and flow >= seuil and mom >= cfg["scalp_seuil_rebond_bps"]:
                 self.evaluate(c, t, "rebond", "short")
+        if cfg["longue_active"] and "tendance" in cfg["longue_familles"] and cfg["autoriser_short"] \
+                and trend <= -cfg["longue_seuil_tendance"] and flow <= -cfg["longue_seuil_flux"]:
+            self.evaluate(c, t, "tendance", "short")  # tendance 15 min baissière confirmée par le flux
         if "elan_long" in self.families and flow >= seuil and mom >= cfg["scalp_seuil_momentum_bps"] \
                 and trend >= cfg["scalp_filtre_tendance"]:
             self.evaluate(c, t, "elan_long", "long")
@@ -521,25 +532,29 @@ class Scalper:
         spread = (b.ask - b.bid) / ((b.ask + b.bid) / 2) * 1e4
         variants = [v for v in self.variants
                     if v[0] == family and v[1]["stop_bps"] >= cfg["scalp_stop_min_ecarts"] * spread]
-        if not variants:
-            return
+        for group in GROUPS:
+            gv = [v for v in variants if v[3] == group]
+            if not gv:
+                continue
+            # Trades fantômes : l'agent apprend de chaque signal, même ceux qu'il ne prend pas.
+            sk = "{}/{}/{}".format(c, family, group)
+            spacing = SHADOW_SPACING_MS if group == "court" else SHADOW_SPACING_LONG_MS
+            if t - self.last_shadow.get(sk, 0) >= spacing and self.n_shadows < cfg["scalp_fantomes_max"]:
+                self.last_shadow[sk] = t
+                for fam, prof, maker, _ in gv:
+                    key = model_key(fam, prof, maker)
+                    sim = SimTrade(side, t, b, prof, cfg, maker, key, features=x, latency_ms=self.sim_latency)
+                    sim.would = self.model_score(key, prof, maker, x)[0] >= cfg["scalp_ev_min_bps"]
+                    self.shadows[c].append(sim)
+                    self.n_shadows += 1
+            self.decide(c, t, side, gv, x, group)
 
-        # Trades fantômes : l'agent apprend de chaque signal, même ceux qu'il ne prend pas.
-        sk = c + "/" + family
-        if t - self.last_shadow.get(sk, 0) >= SHADOW_SPACING_MS and \
-                self.n_shadows < cfg["scalp_fantomes_max"]:
-            self.last_shadow[sk] = t
-            for fam, prof, maker in variants:
-                key = model_key(fam, prof, maker)
-                sim = SimTrade(side, t, b, prof, cfg, maker, key, features=x, latency_ms=self.sim_latency)
-                sim.would = self.model_score(key, prof, maker, x)[0] >= cfg["scalp_ev_min_bps"]
-                self.shadows[c].append(sim)
-                self.n_shadows += 1
-
-        if c in self.trades or not self.can_open() or self.paused(c, t):
+    def decide(self, c, t, side, variants, x, group):
+        cfg = self.cfg
+        if (c, group) in self.trades or not self.can_open() or self.paused(c, t):
             return
         best = None
-        for fam, prof, maker in variants:
+        for fam, prof, maker, _ in variants:
             key = model_key(fam, prof, maker)
             if not self.ready(key) or not self.validated(key):
                 continue
@@ -548,15 +563,15 @@ class Scalper:
                 best = (score, prof, maker, key, p, win, loss, ev)
         if best and best[0] >= cfg["scalp_ev_min_bps"]:
             _, prof, maker, key, p, win, loss, ev = best
-            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev)
-        elif self.can_explore(t, c):
+            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, group=group)
+        elif self.can_explore(t, c, group):
             # Exploration : petit trade réel sur une variante tirée au hasard, pour apprendre en tradant.
-            fam, prof, maker = self.rng.choice(variants)
+            fam, prof, maker, _ = self.rng.choice(variants)
             key = model_key(fam, prof, maker)
             m = self.models[key]
             p = m.calibrated(x)[0] if m.seen >= 50 else m.base_rate
             ev, win, loss = self.expected(prof, p, maker)
-            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True)
+            self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True, group=group)
 
     def model_score(self, key, prof, maker, x):
         """Gain espéré (pb) de la variante selon le modèle calibré, pondéré par l'exécution des ordres limite."""
@@ -573,7 +588,7 @@ class Scalper:
         n = self.cfg["scalp_validation_min"]
         return len(hist) >= n and sum(hist[-n:]) / n >= self.cfg["scalp_validation_min_bps"]
 
-    def can_explore(self, t, c=None):
+    def can_explore(self, t, c=None, group="court"):
         cfg = self.cfg
         if not cfg["scalp_exploration"] or (self.mode != "papier" and not cfg["scalp_exploration_reel"]):
             return False
@@ -581,7 +596,7 @@ class Scalper:
         day = self.state.setdefault("exploration_jour", {"date": "", "pnl": 0.0})
         if day["date"] == str(date.today()) and budget and day["pnl"] <= -budget:
             return False  # budget de pertes du jour épuisé : l'agent continue d'apprendre par les fantômes
-        if c and t - self.last_explore.get(c, -1e18) < cfg["scalp_exploration_espacement_s"] * 1000:
+        if c and t - self.last_explore.get((c, group), -1e18) < cfg["scalp_exploration_espacement_s"] * 1000:
             return False  # pas deux explorations de suite sur la même crypto
         if not cfg["scalp_exploration_par_heure"]:
             return True   # 0 = pas de plafond horaire
@@ -606,15 +621,17 @@ class Scalper:
         pct = cfg["scalp_taille_min_pct"] + (cfg["scalp_taille_max_pct"] - cfg["scalp_taille_min_pct"]) * frac
         return pct * max(0.25, 0.75 ** self.state["serie_pertes"])
 
-    def exposure(self):
-        return sum(s.notional for s in self.trades.values())
+    def exposure(self, group=None):
+        return sum(s.notional for k, s in self.trades.items() if group is None or k[1] == group)
 
-    def open(self, c, t, side, prof, maker, key, x, p, win, loss, ev, explore=False):
+    def open(self, c, t, side, prof, maker, key, x, p, win, loss, ev, explore=False, group="court"):
         cfg = self.cfg
         eq = self.equity_cache
         pct = cfg["scalp_exploration_taille_pct"] if explore else self.size_pct(p, win, loss)
-        # Plafonds : taille d'un trade (pct) et part du capital engagée au total.
-        notional = min(eq * pct / 100, eq * cfg["scalp_exposition_max_pct"] / 100 - self.exposure())
+        # Plafonds : taille d'un trade (pct), part engagée par stratégie, et part engagée au total.
+        cap = cfg["scalp_exposition_court_pct"] if group == "court" else cfg["longue_exposition_pct"]
+        notional = min(eq * pct / 100, eq * cap / 100 - self.exposure(group),
+                       eq * cfg["scalp_exposition_max_pct"] / 100 - self.exposure())
         if notional < 10:
             return
         sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional,
@@ -630,10 +647,10 @@ class Scalper:
                 b = self.books[c]
                 sim._fill(t, b.bid if side == "short" else b.ask, maker=False)
                 self._place_brackets(sim)
-        self.trades[c] = sim
+        self.trades[(c, group)] = sim
         if explore:
             self.explore_times.append(t)
-            self.last_explore[c] = t
+            self.last_explore[(c, group)] = t
         log.info("{}{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
             cyan("[exploration] ") if explore else "", red("▼ SHORT") if side == "short" else green("▲ LONG"),
             self.coins[c]["base"],
@@ -641,7 +658,8 @@ class Scalper:
             fmt_price(sim.limit or sim.entry or (self.books[c].bid if side == "short" else self.books[c].ask), "usd"),
             key, p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
 
-    def _step_real(self, c, sim, t, step):
+    def _step_real(self, tkey, sim, t, step):
+        c = tkey[0]
         before = sim.state
         if self.mode == "papier":
             step(sim)
@@ -651,9 +669,9 @@ class Scalper:
             self.state["stats"]["executes"] += 1
             log.info(dim("  exécuté {} à {}".format(self.coins[c]["base"], fmt_price(sim.entry, "usd"))))
         elif sim.state == "annule":
-            del self.trades[c]
+            del self.trades[tkey]
         elif sim.state == "ferme":
-            del self.trades[c]
+            del self.trades[tkey]
             self.record(c, sim)
 
     def record(self, c, sim):
@@ -719,7 +737,8 @@ class Scalper:
 
     def _poll_live(self, now_ms):
         ex = self.broker.ex
-        for c, sim in list(self.trades.items()):
+        for tkey, sim in list(self.trades.items()):
+            c = tkey[0]
             try:
                 if sim.state == "attente":
                     o = ex.fetch_order(sim.order_id, sim.market)
@@ -729,14 +748,15 @@ class Scalper:
                         self.state["stats"]["executes"] += 1
                     elif now_ms > sim.deadline:
                         ex.cancel_order(sim.order_id, sim.market)
-                        del self.trades[c]
+                        del self.trades[tkey]
             except Exception as e:
                 log.info(yellow("  Suivi d'ordre {} : {}".format(c, e)))
         open_live = {k: v for k, v in self.trades.items() if v.state == "ouvert"}
         if not open_live:
             return
         positions = self.broker.positions()
-        for c, sim in open_live.items():
+        for tkey, sim in open_live.items():
+            c = tkey[0]
             if sim.market in positions:
                 continue
             hit_tp = False
@@ -746,7 +766,7 @@ class Scalper:
                 log.info(yellow("  Statut de l'objectif {} inconnu : compté comme stop.".format(c)))
             self._cancel_brackets(sim)
             sim._close(now_ms, sim.tp if hit_tp else sim.sl, hit_tp, "objectif" if hit_tp else "stop")
-            del self.trades[c]
+            del self.trades[tkey]
             self.record(c, sim)
 
     def _place_brackets(self, sim):
@@ -785,7 +805,7 @@ class Scalper:
         if self.mode != "papier":
             return self.broker.equity(self.state, 0.0)
         open_pnl = 0.0
-        for c, s in self.trades.items():
+        for (c, _g), s in self.trades.items():
             b = self.books.get(c)
             if s.state == "ouvert" and b and b.bid:
                 open_pnl += s.notional * s.gross_bps(b.ask if s.side == "short" else b.bid) / 1e4
@@ -807,26 +827,27 @@ class Scalper:
             st["halted_day"], reason = today, "coupe-circuit journalier"
         if reason:
             log.info(bold(red("⛔ {} : positions fermées, plus d'ouverture.".format(reason))))
-            for c, sim in list(self.trades.items()):
+            for tkey, sim in list(self.trades.items()):
+                c = tkey[0]
                 b = self.books[c]
-                if sim.state == "attente":
-                    del self.trades[c]
+                if sim.state != "ouvert":
+                    del self.trades[tkey]
                 elif self.mode == "papier":
                     sim._close(now_ms, b.ask if sim.side == "short" else b.bid, False, reason)
-                    del self.trades[c]
+                    del self.trades[tkey]
                     self.record(c, sim)
                 else:
                     self._close_live(c, sim, now_ms, reason)
-                    del self.trades[c]
+                    del self.trades[tkey]
                     self.record(c, sim)
 
     def snapshot(self):
         st, s = self.state, self.state["stats"]
         eq = self.equity() if self.mode == "papier" else self.equity_cache
         positions = []
-        for c, sim in self.trades.items():
+        for (c, group), sim in self.trades.items():
             b = self.books.get(c)
-            row = {"crypto": self.coins[c]["base"], "variante": sim.key, "etat": sim.state,
+            row = {"crypto": self.coins[c]["base"], "variante": sim.key, "strategie": group, "etat": sim.state,
                    "notionnel": round(sim.notional, 2)}
             if sim.state == "ouvert" and b and b.bid:
                 now_price = b.ask if sim.side == "short" else b.bid

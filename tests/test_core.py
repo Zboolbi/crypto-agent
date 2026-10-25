@@ -134,7 +134,8 @@ class ScalperTest(unittest.TestCase):
     def test_shadows_first_then_real_trade_when_model_confident(self):
         sc = self.sc
         self._sell_burst(10000)
-        self.assertIn("BTCUSDT/elan", sc.last_shadow, "des trades fantômes doivent être lancés")
+        self.assertIn("BTCUSDT/elan/court", sc.last_shadow, "des trades fantômes doivent être lancés")
+        self.assertIn("BTCUSDT/elan/longue", sc.last_shadow, "et pour la stratégie longue aussi")
         self.assertFalse(sc.trades, "aucun trade réel tant que le modèle apprend")
 
         for key, m in sc.models.items():  # modèle entraîné, confirmé par ses résultats, en entrée limite
@@ -145,8 +146,8 @@ class ScalperTest(unittest.TestCase):
             sc.state["remplissage"][key] = 0.9
             sc.state["validation"][key] = [5.0] * 60 if good else [-5.0] * 60  # validé hors échantillon
         t = self._sell_burst(30000)
-        self.assertIn("BTCUSDT", sc.trades)
-        sim = sc.trades["BTCUSDT"]
+        self.assertIn(("BTCUSDT", "court"), sc.trades)
+        sim = sc.trades[("BTCUSDT", "court")]
         self.assertEqual(sim.state, "attente")
         self.assertLessEqual(sim.notional, sc.equity_cache * CFG["scalp_taille_max_pct"] / 100 + 1e-6)
 
@@ -235,14 +236,20 @@ class BudgetTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_ten_percent_per_trade_and_twenty_five_percent_engaged(self):
+    def test_ten_percent_per_trade_and_caps_per_strategy(self):
         sc = self.sc
+        args = ("short", PROFILE, False, "elan/eclair/marche", [0.0] * len(FEATURES), 0.9, 6, 12, 5)
         for c in sc.coins:
-            sc.open(c, 0, "short", PROFILE, False, "elan/eclair/marche", [0.0] * len(FEATURES), 0.9, 6, 12, 5)
-        sizes = [s.notional for s in sc.trades.values()]
-        self.assertEqual(sizes[:2], [1000.0, 1000.0], "10 % du capital par trade")
-        self.assertAlmostEqual(sum(sizes), 2500.0, msg="25 % du capital engagés au total")
-        self.assertEqual(len(sizes), 3, "le 4e trade n'a plus de place (reste < 10 $)")
+            sc.open(c, 0, args[0], *args[1:], group="court")
+        court = [s.notional for k, s in sc.trades.items() if k[1] == "court"]
+        self.assertEqual(court, [1000.0, 500.0], "10 % par trade, 15 % au plus pour le court terme")
+        for c in sc.coins:
+            sc.open(c, 0, args[0], *args[1:], group="longue")
+        longue = [s.notional for k, s in sc.trades.items() if k[1] == "longue"]
+        self.assertEqual(longue, [1000.0], "10 % au plus pour la stratégie longue")
+        self.assertAlmostEqual(sc.exposure(), 2500.0, msg="25 % engagés au total")
+        self.assertIn(("A", "court"), sc.trades)
+        self.assertIn(("A", "longue"), sc.trades, "les deux stratégies peuvent tenir la même crypto")
 
     def test_new_session_keeps_knowledge(self):
         sc = self.sc
@@ -278,9 +285,9 @@ class ExplorationTest(unittest.TestCase):
         sc.open = lambda *a, **k: (opened.append(k.get("explore")), real_open(*a, **k))
         self.burst(sc, 10000)
         self.assertFalse(sc.ready(), "le modèle est encore en apprentissage")
-        self.assertEqual(opened, [True], "un seul trade d'exploration, puis attente d'une minute")
-        self.assertEqual(sc.state["stats"]["ordres"], 1)
-        sim = sc.trades.get("BTCUSDT")
+        self.assertEqual(opened, [True, True], "un trade d'exploration par stratégie (court et longue), puis attente")
+        self.assertEqual(sc.state["stats"]["ordres"], 2)
+        sim = sc.trades.get(("BTCUSDT", "court"))
         if sim:  # l'ordre limite peut avoir expiré pendant la chute simulée
             self.assertTrue(sim.explore)
             self.assertAlmostEqual(sim.notional, sc.equity_cache * CFG["scalp_exploration_taille_pct"] / 100)
@@ -294,7 +301,7 @@ class ExplorationTest(unittest.TestCase):
 
     def test_unlimited_with_per_crypto_spacing(self):
         sc = self.make(scalp_exploration_par_heure=0, scalp_exploration_espacement_s=10)
-        sc.last_explore["BTCUSDT"] = 0
+        sc.last_explore[("BTCUSDT", "court")] = 0
         self.assertFalse(sc.can_explore(5000, "BTCUSDT"), "même crypto : 10 s d'écart minimum")
         self.assertTrue(sc.can_explore(5000, "ETHUSDT"), "autre crypto : pas d'attente")
         sc.explore_times.extend(range(0, 5000, 10))  # 500 explorations dans l'heure

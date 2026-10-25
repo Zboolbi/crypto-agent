@@ -100,6 +100,19 @@ DEFAULT_CONFIG = {
     "scalp_taille_min_pct": 2,         # taille selon la confiance du modèle, en % du capital
     "scalp_taille_max_pct": 10,        # 10 % du capital au plus par trade
     "scalp_exposition_max_pct": 25,    # 25 % du capital engagés au plus, toutes positions confondues
+    "scalp_exposition_court_pct": 15,  # dont 15 % au plus pour le scalping court…
+    "longue_exposition_pct": 10,       # … et 10 % au plus pour les positions longues
+    # -- stratégie longue (scalper.py, en parallèle du scalping court) --
+    "longue_active": True,
+    "scalp_profils_longs": [           # objectifs bien au-dessus des frais (4 à 10 pb l'aller-retour)
+        {"nom": "trente_s", "objectif_bps": 30, "stop_bps": 25, "duree_s": 30},
+        {"nom": "une_min", "objectif_bps": 45, "stop_bps": 35, "duree_s": 60},
+        {"nom": "cinq_min", "objectif_bps": 90, "stop_bps": 60, "duree_s": 300},
+        {"nom": "dix_min", "objectif_bps": 140, "stop_bps": 90, "duree_s": 600},
+    ],
+    "longue_familles": ["elan", "rebond", "tendance"],
+    "longue_seuil_tendance": 40,       # famille « tendance » : score 15 min ≤ -40…
+    "longue_seuil_flux": 0.2,          # … confirmé par une pression vendeuse sur 10 s
     "scalp_ev_min_bps": 1.0,           # gain espéré minimal après frais pour un trade réel
     "scalp_validation_min": 50,        # trades fantômes « choisis » requis pour valider une variante
     "scalp_validation_min_bps": 1.0,   # leur résultat net moyen doit dépasser ce seuil
