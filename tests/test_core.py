@@ -40,7 +40,7 @@ class BookTest(unittest.TestCase):
 class SimTradeTest(unittest.TestCase):
     def test_limit_order_waits_for_queue(self):
         b = book(ask_top=5.0)
-        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=0)
         self.assertEqual(s.state, "attente")
         s.on_trade(100, 100.01, 3.0, False, b)  # 3 achetés au prix limite : il reste 2 devant nous
         self.assertEqual(s.state, "attente")
@@ -50,19 +50,19 @@ class SimTradeTest(unittest.TestCase):
 
     def test_limit_order_filled_when_price_trades_through(self):
         b = book()
-        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=0)
         s.on_trade(50, 100.05, 0.1, False, b)
         self.assertEqual(s.state, "ouvert")
 
     def test_limit_order_cancelled_after_deadline(self):
         b = book()
-        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=0)
         s.on_book(CFG["scalp_entree_delai_s"] * 1000 + 1, b)
         self.assertEqual(s.state, "annule")
 
     def test_take_profit_net_of_maker_fees(self):
         b = book()
-        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=0)
         s.on_trade(1, 100.02, 10, False, b)
         s.on_trade(2, s.tp * 0.9999, 1, True, b)
         self.assertEqual(s.reason, "objectif")
@@ -70,7 +70,7 @@ class SimTradeTest(unittest.TestCase):
 
     def test_stop_uses_worst_price(self):
         b = book()
-        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=0)
         s.on_trade(1, 100.02, 10, False, b)
         b.set_depth([["100.2", "1"]], [["100.3", "1"]])  # le marché saute au-dessus du stop
         s.on_book(2, b)
@@ -80,7 +80,7 @@ class SimTradeTest(unittest.TestCase):
 
     def test_market_entry_pays_taker(self):
         cfg = CFG
-        s = scalper.SimTrade("short", 0, book(), PROFILE, cfg, False)
+        s = scalper.SimTrade("short", 0, book(), PROFILE, cfg, False, latency_ms=0)
         self.assertEqual(s.state, "ouvert")
         self.assertEqual(s.entry, 100.0)  # vendu au meilleur acheteur
         self.assertAlmostEqual(s.fee_bps, cfg["frais_pct"] * 100)
@@ -152,7 +152,9 @@ class ScalperTest(unittest.TestCase):
         sc.on_trade("BTCUSDT", t + 100, sim.limit + 0.05, 1.0, False)  # exécution de l'ordre limite
         self.assertEqual(sim.state, "ouvert")
         cash = sc.state["cash"]
-        sc.on_trade("BTCUSDT", t + 200, sim.tp * 0.999, 1.0, True)    # objectif atteint
+        sc.on_trade("BTCUSDT", t + 200, sim.tp * 0.999, 1.0, True)    # trop tôt : l'ordre d'objectif n'est pas arrivé
+        self.assertEqual(sim.state, "ouvert")
+        sc.on_trade("BTCUSDT", t + 500, sim.tp * 0.999, 1.0, True)    # objectif atteint
         self.assertEqual(sim.reason, "objectif")
         self.assertGreater(sc.state["cash"], cash)
         self.assertEqual(sc.state["stats"]["trades"], 1)
@@ -172,7 +174,7 @@ class ScalperTest(unittest.TestCase):
         sc = self.sc
         b = book()
         for i in range(5):
-            sim = scalper.SimTrade("short", i * 1000, b, PROFILE, CFG, False, features=[0.0] * len(FEATURES),
+            sim = scalper.SimTrade("short", i * 1000, b, PROFILE, CFG, False, features=[0.0] * len(FEATURES), latency_ms=0,
                                    p=0.6, notional=1000.0)
             sim._close(i * 1000 + 500, sim.entry * 1.002, False, "stop")
             sc.record("BTCUSDT", sim)
@@ -286,7 +288,7 @@ class ExplorationTest(unittest.TestCase):
     def test_exploration_loss_does_not_quarantine_or_shrink(self):
         sc = self.make()
         for i in range(6):
-            sim = scalper.SimTrade("short", i * 1000, book(), PROFILE, CFG, False, features=[0.0] * len(FEATURES),
+            sim = scalper.SimTrade("short", i * 1000, book(), PROFILE, CFG, False, features=[0.0] * len(FEATURES), latency_ms=0,
                                    p=0.3, notional=200.0)
             sim.explore = True
             sim._close(i * 1000 + 500, sim.entry * 1.003, False, "stop")
@@ -310,11 +312,34 @@ class ExplorationTest(unittest.TestCase):
         self.assertFalse(sc.can_explore(0))
 
 
+class LatencyTest(unittest.TestCase):
+    def test_no_fill_or_target_before_the_order_reaches_the_exchange(self):
+        b = book(bid=100.0, ask=100.01)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, False, latency_ms=300)
+        b.add_trade(100, 99.0, -1000.0, 10000)
+        s.on_trade(100, 99.0, 1.0, True, b)                 # chute avant l'arrivée de l'ordre
+        self.assertEqual(s.state, "envoi", "rien n'est exécuté pendant la latence")
+        b.add_trade(400, 99.0, -1000.0, 10000)
+        s.on_trade(400, 99.0, 1.0, True, b)                 # l'ordre arrive : vendu au prix réel, pas au carnet périmé
+        self.assertEqual((s.state, s.entry), ("ouvert", 99.0))
+        s.on_trade(500, s.tp * 0.999, 1.0, True, b)
+        self.assertEqual(s.state, "ouvert", "l'objectif n'est pas encore déposé")
+        s.on_trade(800, s.tp * 0.999, 1.0, True, b)
+        self.assertEqual(s.reason, "objectif")
+
+    def test_post_only_rejected_if_price_crossed(self):
+        b = book(bid=100.0, ask=100.01)
+        s = scalper.SimTrade("short", 0, b, PROFILE, CFG, True, latency_ms=300)
+        b.set_depth([["100.02", "3"]], [["100.03", "3"]])     # le prix monte au-dessus de notre limite
+        s.on_book(400, b)
+        self.assertEqual(s.state, "annule")
+
+
 class RebondExitTest(unittest.TestCase):
     def test_rebound_short_is_not_closed_by_buy_pressure(self):
         b = book()
         for key, expect_exit in (("rebond/eclair/marche", False), ("elan/eclair/marche", True)):
-            s = scalper.SimTrade("short", 0, b, PROFILE, CFG, False, key)
+            s = scalper.SimTrade("short", 0, b, PROFILE, CFG, False, key, latency_ms=0)
             b.add_trade(500, 100.0, 50000.0, 10000)   # forte pression acheteuse
             s.on_trade(2000, 100.0, 1.0, False, b)
             self.assertEqual(s.state == "ferme", expect_exit, key)

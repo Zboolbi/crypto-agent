@@ -140,9 +140,10 @@ class SimTrade:
     __slots__ = ("side", "profile", "key", "features", "p", "notional", "maker_entry", "limit", "queue", "deadline",
                  "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
                  "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed",
-                 "explore")
+                 "explore", "lat", "active", "tp_active")
 
-    def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0):
+    def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0,
+                 latency_ms=None):
         self.side, self.profile, self.features, self.p, self.notional = side, profile, features, p, notional
         self.key = key or model_key("elan", profile, maker)
         self.maker_bps, self.taker_bps = cfg["frais_maker_pct"] * 100, cfg["frais_pct"] * 100
@@ -156,18 +157,36 @@ class SimTrade:
         self.qty = 0.0
         self.explore = False
         self.fee_bps = 0.0
+        # Latence aller-retour : l'agent voit le marché en retard et son ordre met encore du temps à
+        # atteindre l'exchange. Rien ne peut être exécuté avant `active`.
+        self.lat = cfg["scalp_latence_ms"] if latency_ms is None else latency_ms
+        self.active, self.tp_active = t + self.lat, None
+        self.state = "envoi"
         if self.maker_entry:
             # Ordre limite au meilleur prix de notre côté : on rejoint la file d'attente existante.
             self.limit = book.ask if side == "short" else book.bid
             self.queue = book.ask_top if side == "short" else book.bid_top
-            self.deadline = t + cfg["scalp_entree_delai_s"] * 1000
-            self.state = "attente"
+            self.deadline = self.active + cfg["scalp_entree_delai_s"] * 1000
         else:
-            self.limit, self.queue, self.deadline = None, 0.0, t
-            self._fill(t, book.bid if side == "short" else book.ask, maker=False)
+            self.limit, self.queue, self.deadline = None, 0.0, self.active
+        if self.lat <= 0:
+            self._activate(t, book)
+
+    def _activate(self, t, book):
+        """L'ordre arrive sur l'exchange : exécution au marché, ou mise en file de l'ordre limite."""
+        short = self.side == "short"
+        if self.maker_entry:
+            # Post-only : rejeté si le prix a déjà traversé la limite (il serait exécuté au marché).
+            crossed = (book.bid >= self.limit) if short else (book.ask <= self.limit)
+            self.state = "annule" if crossed else "attente"
+        else:
+            # Au marché : au moins bon prix entre le carnet et la dernière transaction.
+            last = book.last or (book.bid if short else book.ask)
+            self._fill(t, min(book.bid, last) if short else max(book.ask, last), maker=False)
 
     def _fill(self, t, price, maker):
         self.entry, self.opened, self.state = price, t, "ouvert"
+        self.tp_active = t + self.lat  # l'ordre d'objectif n'est déposé qu'après confirmation de l'entrée
         self.fee_bps = self.maker_bps if maker else self.taker_bps
         tp, sl = self.profile["objectif_bps"] / 1e4, self.profile["stop_bps"] / 1e4
         short = self.side == "short"
@@ -188,6 +207,12 @@ class SimTrade:
 
     def on_trade(self, t, price, qty, seller_aggressor, book):
         short = self.side == "short"
+        if self.state == "envoi":
+            if t < self.active:
+                return
+            self._activate(t, book)
+            if self.state != "attente":
+                return
         if self.state == "attente":
             if t > self.deadline:
                 self.state = "annule"
@@ -201,7 +226,7 @@ class SimTrade:
                     self._fill(t, self.limit, maker=True)
         elif self.state == "ouvert":
             # L'objectif est un ordre limite au repos : exécuté si le prix le traverse.
-            if (short and price < self.tp) or (not short and price > self.tp):
+            if t >= self.tp_active and ((short and price < self.tp) or (not short and price > self.tp)):
                 self._close(t, self.tp, True, "objectif")
             elif self.flow_exit is not None and t - self.opened > 1000:
                 f = book.flow()
@@ -210,6 +235,11 @@ class SimTrade:
 
     def on_book(self, t, book):
         short = self.side == "short"
+        if self.state == "envoi":
+            if t < self.active:
+                return
+            self._activate(t, book)
+            return
         if self.state == "attente":
             if t > self.deadline:
                 self.state = "annule"
@@ -253,6 +283,7 @@ class Scalper:
         self.latencies = collections.deque(maxlen=2000)
         self.msgs = self.reconnects = self.n_shadows = 0
         self.proc_us = 0.0                     # temps de traitement moyen d'un message
+        self.sim_latency = self.cfg["scalp_latence_ms"]  # latence aller-retour simulée
         self.rate = (time.time(), 0, 0.0)      # (instant, messages cumulés, débit msg/s)
         self.msg_total = 0
         self.offset_ms = 0.0
@@ -270,6 +301,14 @@ class Scalper:
                 st = json.load(f)
             if "modeles" in st:
                 st.setdefault("remplissage", {})
+                if st.get("version_modeles", 1) < 3:
+                    # Avant la version 3, la simulation exécutait les ordres sans latence (gains irréalistes) :
+                    # portefeuille, journal et modèles archivés, on repart d'un état propre.
+                    for path in (self.state_path, self.journal_path, self.state_path.replace("portefeuille", "courbe")
+                                 .replace(".json", ".csv")):
+                        if os.path.exists(path):
+                            os.replace(path, path + ".sans-latence")
+                    return self._load_state()
                 if st.get("version_modeles", 1) < 2:
                     # Modèles « rebond » entraînés avec une sortie sur flux inversé erronée : on repart de zéro.
                     for k in [k for k in st["modeles"] if k.startswith("rebond/")]:
@@ -282,7 +321,7 @@ class Scalper:
                 os.replace(self.journal_path, self.journal_path + ".ancien")
         cap = self.cfg["capital_initial"]
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
-                "modeles": {}, "version_modeles": 2, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
+                "modeles": {}, "version_modeles": 3, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
                 "stats": {"trades": 0, "gagnants": 0, "pnl": 0.0, "frais": 0.0, "volume": 0.0,
                           "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time(),
                           "exploration": 0, "exploration_pnl": 0.0}}
@@ -483,7 +522,7 @@ class Scalper:
             self.last_shadow[sk] = t
             for fam, prof, maker in variants:
                 self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, model_key(fam, prof, maker),
-                                                features=x))
+                                                features=x, latency_ms=self.sim_latency))
                 self.n_shadows += 1
 
         if c in self.trades or not self.can_open() or self.paused(c, t):
@@ -553,11 +592,19 @@ class Scalper:
         notional = min(eq * pct / 100, eq * cfg["levier_max"] - self.exposure())
         if notional < 10:
             return
-        sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional)
+        sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional,
+                       latency_ms=self.sim_latency)
         sim.explore = explore
         self.state["stats"]["ordres"] += 1
-        if self.mode != "papier" and not self._send_entry(c, sim):
-            return
+        if self.mode != "papier":
+            if not self._send_entry(c, sim):
+                return
+            if maker:
+                sim.state = "attente"   # l'exchange gère la file ; suivi par _poll_live
+            else:
+                b = self.books[c]
+                sim._fill(t, b.bid if side == "short" else b.ask, maker=False)
+                self._place_brackets(sim)
         self.trades[c] = sim
         if explore:
             self.explore_times.append(t)
@@ -574,7 +621,7 @@ class Scalper:
             step(sim)
         elif sim.state == "ouvert" and t - sim.opened > sim.max_ms:
             self._close_live(c, sim, t, "durée max")
-        if sim.state == "ouvert" and before == "attente":
+        if sim.state == "ouvert" and before in ("envoi", "attente"):
             self.state["stats"]["executes"] += 1
             log.info(dim("  exécuté {} à {}".format(self.coins[c]["base"], fmt_price(sim.entry, "usd"))))
         elif sim.state == "annule":
@@ -808,6 +855,9 @@ class Scalper:
                 self.show()
 
     def status(self):
+        lat = sorted(self.latencies)
+        if lat:  # aller (données) + retour (ordre) ≈ 2 × le retard mesuré du flux
+            self.sim_latency = max(self.cfg["scalp_latence_ms"], 2 * lat[len(lat) // 2])
         s = self.state["stats"]
         hours = max((time.time() - s["debut"]) / 3600, 1 / 60)
         lat = sorted(self.latencies)

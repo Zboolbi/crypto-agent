@@ -78,7 +78,8 @@ DEFAULT_CONFIG = {
     "scalp_volume_24h_min_usd": 10000000,  # volume quotidien minimal d'un contrat pour être suivi
     "scalp_familles": ["elan", "rebond"],  # short pendant une chute / short après une poussée trop rapide
     "scalp_entree": "auto",            # « auto » (le modèle choisit), « limite » (maker) ou « marche »
-    "scalp_entree_delai_s": 3,         # ordre limite annulé s'il n'est pas exécuté à temps
+    "scalp_entree_delai_s": 3,
+    "scalp_latence_ms": 300,           # latence aller-retour simulée minimale (2 × le retard mesuré si plus grand)         # ordre limite annulé s'il n'est pas exécuté à temps
     "scalp_profils": [                 # chaque signal est évalué sur ces profils, le meilleur est retenu
         {"nom": "precis", "objectif_bps": 8, "stop_bps": 20, "duree_s": 60},
         {"nom": "eclair", "objectif_bps": 10, "stop_bps": 8, "duree_s": 20},
