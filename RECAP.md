@@ -1,6 +1,6 @@
 # Récapitulatif du projet crypto-agent
 
-**État au 25/10/2026, 09:26 (heure de Paris, heure d'hiver depuis cette nuit).**
+**État au 25/10/2026, 10:08 (heure de Paris, heure d'hiver depuis cette nuit).**
 Ce document est la référence de travail. Le mettre à jour (date et heure en tête) après chaque étape importante, plutôt que de relire tout le code ou tout l'historique.
 
 ---
@@ -59,12 +59,15 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 3. **Signaux candidats (short uniquement)** : famille « élan » (pression vendeuse et baisse) et famille « rebond » (poussée acheteuse rapide). Profils : précis 8/20 pb sur 60 s, éclair 10/8 pb sur 20 s, rapide 20/15 pb sur 60 s, large 35/25 pb sur 180 s. Entrée par ordre limite ou au marché, soit **16 variantes**.
 4. **Trades fantômes** pour chaque candidat. Ils entraînent un modèle par variante.
 5. **Simulation réaliste depuis le 25/10 04:20** : aucun ordre n'est exécuté avant la latence aller-retour (au moins 300 ms, ou 2 fois le retard mesuré). Un ordre au marché est exécuté au moins bon prix entre le carnet et la dernière transaction. Un ordre post-only est rejeté si le prix a franchi sa limite. L'objectif n'est actif qu'après confirmation de l'entrée ; le stop est immédiat.
+5 bis. **Deux stratégies en parallèle (depuis le 25/10 10:05)**, positions indexées par (contrat, stratégie) :
+   - **court** : les 4 profils ci-dessus, familles élan et rebond, **15 % du capital engagés au plus** ;
+   - **longue** : profils trente_s (30/25 pb, 30 s), une_min (45/35 pb, 1 min), cinq_min (90/60 pb, 5 min) et dix_min (140/90 pb, 10 min) ; familles élan, rebond et **tendance** (score 15 min ≤ −40 et pression vendeuse) ; **10 % engagés au plus** ; fantômes au plus toutes les 10 s par crypto. Réglages `longue_*` et `scalp_profils_longs`.
 6. **Trade réel décidé par le modèle** seulement si :
    - le modèle est prêt (200 exemples) ;
    - **la variante est validée hors échantillon** : ses 50 derniers trades fantômes « que le modèle aurait pris » gagnent plus de 1 pb net en moyenne ;
    - le gain espéré calibré dépasse 1 pb.
-   Taille : 5 à 60 % du capital selon la confiance (Kelly fractionné).
-7. **Exploration** : trades de 2 % du capital, sans plafond horaire, 10 s minimum entre deux trades sur une même crypto, **budget de pertes de 1 % du capital par jour (100 $)**. Désactivée en mode réel par défaut.
+   Taille : **2 à 10 % du capital** selon la confiance (Kelly fractionné). Plafond total : **25 % du capital engagés** (`scalp_exposition_max_pct`).
+7. **Exploration** : trades de **10 % du capital**, sans plafond horaire, 10 s minimum entre deux trades sur une même crypto et une même stratégie, **budget de pertes de 25 % du capital par jour (2 500 $)**, réglé le 25/10 à 09:57 à la demande de l'utilisateur. Désactivée en mode réel par défaut.
 8. **Garde-fous** : la variante doit avoir un stop d'au moins 3 fois l'écart achat/vente ; quarantaine d'1 h d'une crypto après 5 trades réels perdants ; coupe-circuits (−15 % par jour, −50 % depuis le plus haut).
 9. **Solde en temps réel** : `.venv/bin/python scalper.py solde [--suivre]`. Bilan : `scalper.py bilan`.
 
@@ -76,9 +79,11 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | 25/10 00:36–00:58 | Exploration illimitée, 107 cryptos | ≈ −66 $ ; élan +0,2 pb brut seulement, rebond −8,8 pb brut |
 | 25/10 01:16–05:16 | **Cycle 1 (4 h)** | Scalping **+2 420 $ = ARTEFACT** (exécution sans latence, carnet en retard, 187 objectifs en moins de 0,3 s, surtout sur ALT). Corrigé, données archivées en `*.sans-latence`. |
 | 25/10 04:21–08:21 | **Cycle 2 (4 h, simulation réaliste)** | Scalping **−557 $** (modèle −456 $ sur 213 trades, 36 % gagnants ; exploration −101 $). Tendance −11 $. Financement −0,19 $. |
-| 25/10 08:22– | **Cycle 3 en cours**, avec la validation hors échantillon | À 09:26 : **0 trade de scalping**. Aucune variante validée et budget d'exploration du jour épuisé. |
+| 25/10 08:22–09:57 | Cycle 3, avec la validation hors échantillon | **0 trade de scalping** : aucune variante validée, budget d'exploration du jour épuisé. Cycle interrompu. |
+| 25/10 09:57 | **Nouvelle session** (`scalper.py nouvelle-session`) : portefeuille neuf à 10 000 $, modèles et validation conservés. Plafonds : 10 % par trade, 25 % engagés, budget d'exploration 25 %/jour. | Ancien journal archivé en `*.session-20261025-0957`. |
+| 25/10 10:05 | **Stratégie longue ajoutée** (30 s à 10 min) en parallèle du scalping court. | À 10:07 : 77 trades d'exploration, 48 % gagnants, −45,16 $. |
 
-**Soldes à 09:26** : scalping 9 428,70 $ (départ 10 000 $ remis à zéro à 04:20) ; tendance 9 699,53 $ (3 shorts ouverts depuis 01:15 : DOT, AAVE, JUP) ; financement 9 995,08 $ (1 position INIT à environ 11 %/an, +0,20 $ encaissés).
+**Soldes à 10:07** : scalping 9 954,84 $ (nouvelle session à 10 000 $ depuis 09:57) ; tendance 9 699,53 $ (3 shorts ouverts depuis 01:15 : DOT, AAVE, JUP) ; financement 9 995,08 $ (1 position INIT à environ 11 %/an, +0,20 $ encaissés).
 
 ## 7. Ce que les données ont établi (ne pas re-démontrer)
 
@@ -97,10 +102,13 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 - **Ne pas pousser sur GitHub** sans demande explicite.
 - Refusé : se connecter à son compte ChatGPT (identifiants d'un autre service). Hors périmètre : modifier les réglages de sécurité macOS (accès complet au disque).
 - Il demande des cycles de test de 4 h, puis analyse, optimisation et nouveau cycle, jusqu'à de nouvelles consignes.
+- 25/10 09:50 : il veut que chaque position soit au moins gagnante, frais compris. Fait établi : un objectif atteint l'est toujours ; seuls le stop, la durée maximale et le flux inversé peuvent fermer en perte. **Question en attente** : bloquer les sorties en perte autres que le stop (durée maximale et flux inversé ne fermeraient plus en perte) ? Le stop doit rester.
+- 25/10 10:00 : il veut deux stratégies en parallèle, le scalping actuel (« très bien ») et des positions plus longues (30 s à 10 min) avec de plus gros gains. C'est fait.
 
 ## 9. Points ouverts et pistes
 
-1. **Le scalping ne trade plus.** Il attend qu'une variante soit validée et que le budget d'exploration se renouvelle (minuit). C'est voulu, mais il faut décider : arrêter le scalping, réduire ses frais (niveau VIP ou remise BNB, exchange avec rebates maker), ou viser d'autres horizons.
+1. **Les trades actuels sont presque tous d'exploration** (aucune variante validée). Avec un budget de 2 500 $/jour, l'exploration peut faire baisser le solde ; à surveiller. Observer si des variantes longues (cinq_min, dix_min, tendance) passent la validation.
+1 bis. La ligne « Profils » du journal au démarrage n'affiche que les profils courts (cosmétique).
 2. **Tendance** : 3 shorts ouverts depuis 01:15 sans clôture ; la vérifier dans le prochain bilan.
 3. **Financement** : stable mais lent ; il faut des jours pour juger.
 4. Le tableau de bord n'affiche que le scalping ; la tendance et le financement n'y figurent pas.
@@ -108,4 +116,4 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 
 ## 10. Commits locaux (du plus récent au plus ancien)
 
-`4e777a2` validation hors échantillon · `dff2d40` affichage du prix des ordres au marché · `da6f2b3` simulation avec latence · `4f9ff94` financement + budget d'exploration + analyse.py · `611e34e` univers élargi + limites levées + stop/écart · `89aa797` correction des shorts rebond + espacement · `1b52265` exploration · `ab8f813` tableau de bord + calibrage + Python 3.12 · `34528ea` version initiale (seul commit poussé)
+`(dernier)` stratégie longue en parallèle · `(avant-dernier)` plafonds 10 %/25 % + nouvelle session · `297baa5` RECAP · `4e777a2` validation hors échantillon · `dff2d40` affichage du prix des ordres au marché · `da6f2b3` simulation avec latence · `4f9ff94` financement + budget d'exploration + analyse.py · `611e34e` univers élargi + limites levées + stop/écart · `89aa797` correction des shorts rebond + espacement · `1b52265` exploration · `ab8f813` tableau de bord + calibrage + Python 3.12 · `34528ea` version initiale (seul commit poussé)
