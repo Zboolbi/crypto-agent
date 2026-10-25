@@ -142,7 +142,7 @@ class SimTrade:
     __slots__ = ("side", "profile", "key", "features", "p", "notional", "maker_entry", "limit", "queue", "deadline",
                  "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
                  "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed",
-                 "explore", "lat", "active", "tp_active", "would")
+                 "explore", "lat", "active", "tp_active", "would", "extensions", "ext")
 
     def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0,
                  latency_ms=None):
@@ -154,6 +154,10 @@ class SimTrade:
         self.flow_exit = None if self.key.startswith("rebond/") else cfg["scalp_sortie_flux"]
         self.maker_entry = maker
         self.max_ms = profile["duree_s"] * 1000
+        # Prolongation à l'échéance d'une position perdante qui peut encore devenir gagnante.
+        self.extensions = 0
+        self.ext = (cfg["scalp_prolongations_max"], profile["duree_s"] * 1000 * cfg["scalp_prolongation_pct"] / 100,
+                    cfg["scalp_prolongation_flux_max"], cfg["scalp_prolongation_perte_max_pct_stop"] / 100)
         self.entry = self.opened = self.exit = self.reason = self.closed = None
         self.order_id = self.market = self.tp_id = self.sl_id = None
         self.qty = 0.0
@@ -252,7 +256,27 @@ class SimTrade:
             elif not short and book.bid <= self.sl:
                 self._close(t, min(self.sl, book.bid), False, "stop")
             elif t - self.opened > self.max_ms:
-                self._close(t, book.ask if short else book.bid, False, "durée max")
+                if self.should_extend(book):
+                    self.extensions += 1
+                    self.max_ms += self.ext[1]
+                else:
+                    reason = "durée max" + (" (prolongée ×{})".format(self.extensions) if self.extensions else "")
+                    self._close(t, book.ask if short else book.bid, False, reason)
+
+    def should_extend(self, book):
+        """À l'échéance : prolonger si la position est perdante après frais mais récupérable,
+        c'est-à-dire flux pas nettement contraire et perte inférieure à une part de la distance au stop."""
+        max_ext, _, flow_max, loss_share = self.ext
+        if self.extensions >= max_ext:
+            return False
+        short = self.side == "short"
+        exit_price = book.ask if short else book.bid
+        gross = self.gross_bps(exit_price)
+        if gross - self.fee_bps - self.taker_bps >= 0:
+            return False  # gagnante (frais de sortie compris) : on encaisse
+        flow = book.flow()
+        against = flow if short else -flow  # pour un short, des achats dominants vont contre la position
+        return against <= flow_max and -gross <= loss_share * self.profile["stop_bps"]
 
 
 # --------------------------------------------------------------------------- #
@@ -664,7 +688,11 @@ class Scalper:
         if self.mode == "papier":
             step(sim)
         elif sim.state == "ouvert" and t - sim.opened > sim.max_ms:
-            self._close_live(c, sim, t, "durée max")
+            if sim.should_extend(self.books[c]):
+                sim.extensions += 1
+                sim.max_ms += sim.ext[1]
+            else:
+                self._close_live(c, sim, t, "durée max")
         if sim.state == "ouvert" and before in ("envoi", "attente"):
             self.state["stats"]["executes"] += 1
             log.info(dim("  exécuté {} à {}".format(self.coins[c]["base"], fmt_price(sim.entry, "usd"))))

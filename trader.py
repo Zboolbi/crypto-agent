@@ -97,6 +97,10 @@ DEFAULT_CONFIG = {
     "scalp_pas_max_bps": 3,            # contrat exclu si son pas de prix dépasse 3 pb
     "scalp_sortie_flux": 0.8,          # sortie anticipée si les achats dominent nettement
     "scalp_pause_s": 0,                # 0 = peut reshorter immédiatement après une sortie
+    "scalp_prolongations_max": 2,      # à l'échéance, une position perdante mais récupérable est prolongée…
+    "scalp_prolongation_pct": 100,     # … de 100 % de sa durée initiale à chaque fois
+    "scalp_prolongation_flux_max": 0.3,  # … si le flux ne va pas nettement contre elle
+    "scalp_prolongation_perte_max_pct_stop": 50,  # … et si sa perte reste sous 50 % de la distance au stop
     "scalp_taille_min_pct": 2,         # taille selon la confiance du modèle, en % du capital
     "scalp_taille_max_pct": 10,        # 10 % du capital au plus par trade
     "scalp_exposition_max_pct": 25,    # 25 % du capital engagés au plus, toutes positions confondues

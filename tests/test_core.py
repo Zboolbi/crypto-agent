@@ -402,6 +402,49 @@ class LatencyTest(unittest.TestCase):
         self.assertEqual(s.state, "annule")
 
 
+class ExtensionTest(unittest.TestCase):
+    PROF = {"nom": "une_min", "objectif_bps": 45, "stop_bps": 35, "duree_s": 60}
+
+    def open_short(self, b):
+        s = scalper.SimTrade("short", 0, b, self.PROF, CFG, False, "elan/une_min/marche", latency_ms=0)
+        self.assertEqual((s.state, s.entry), ("ouvert", 100.0))
+        return s
+
+    def test_losing_recoverable_position_is_extended_then_closed(self):
+        b = book(bid=100.0, ask=100.01)
+        s = self.open_short(b)
+        b.set_depth([["100.04", "3"]], [["100.05", "3"]])     # perte légère (5 pb), flux neutre
+        s.on_book(61000, b)
+        self.assertEqual((s.state, s.extensions), ("ouvert", 1), "prolongée au lieu de fermer en perte")
+        s.on_book(121000, b)
+        s.on_book(181000, b)
+        self.assertEqual(s.state, "ferme", "2 prolongations au plus")
+        self.assertEqual(s.reason, "durée max (prolongée ×2)")
+
+    def test_no_extension_when_flow_is_against(self):
+        b = book(bid=100.0, ask=100.01)
+        s = self.open_short(b)
+        b.set_depth([["100.04", "3"]], [["100.05", "3"]])
+        b.add_trade(60000, 100.05, 50000.0, 10000)          # forte pression acheteuse contre le short
+        s.on_book(61000, b)
+        self.assertEqual(s.state, "ferme")
+
+    def test_no_extension_when_loss_is_too_close_to_stop(self):
+        b = book(bid=100.0, ask=100.01)
+        s = self.open_short(b)
+        b.set_depth([["100.24", "3"]], [["100.25", "3"]])     # perte de 25 pb > 50 % du stop de 35 pb
+        s.on_book(61000, b)
+        self.assertEqual(s.state, "ferme")
+
+    def test_winning_position_closes_at_deadline(self):
+        b = book(bid=100.0, ask=100.01)
+        s = self.open_short(b)
+        b.set_depth([["99.79", "3"]], [["99.80", "3"]])       # gain de 20 pb, frais couverts
+        s.on_book(61000, b)
+        self.assertEqual((s.state, s.reason), ("ferme", "durée max"))
+        self.assertGreater(s.net_bps(), 0)
+
+
 class RebondExitTest(unittest.TestCase):
     def test_rebound_short_is_not_closed_by_buy_pressure(self):
         b = book()
