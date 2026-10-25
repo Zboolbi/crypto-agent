@@ -612,7 +612,8 @@ class Scalper:
         log.info("{}{} {} {} {} · {} · proba {:.0%} · espérance {:+.1f} pb · {:.0f}% du capital {}".format(
             cyan("[exploration] ") if explore else "", red("▼ SHORT") if side == "short" else green("▲ LONG"),
             self.coins[c]["base"],
-            "limite" if sim.maker_entry else "marché", fmt_price(sim.limit or sim.entry, "usd"),
+            "limite" if sim.maker_entry else "marché",
+            fmt_price(sim.limit or sim.entry or (self.books[c].bid if side == "short" else self.books[c].ask), "usd"),
             key, p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
 
     def _step_real(self, c, sim, t, step):
