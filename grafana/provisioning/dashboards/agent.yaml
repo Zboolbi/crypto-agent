@@ -1,0 +1,10 @@
+# Tableaux de bord provisionnés depuis le dossier grafana/tableaux du projet.
+apiVersion: 1
+providers:
+  - name: Agent crypto
+    folder: ""
+    type: file
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: $CRYPTO_AGENT_DIR/grafana/tableaux

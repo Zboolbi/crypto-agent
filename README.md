@@ -219,3 +219,27 @@ Python 3.9, celui de macOS, n'est plus maintenu depuis octobre 2025, et ccxt exi
 ```
 
 Le mode papier n'a besoin d'aucune dépendance. `ccxt` sert uniquement aux modes testnet et réel.
+
+---
+
+# Tableau de bord Grafana (local)
+
+**http://localhost:3000** : Grafana OSS 13.2.3 installé en local, accessible en lecture sans connexion, et seulement depuis ce Mac.
+
+Les données suivent ce chemin :
+1. l'agent écrit ses fichiers d'état et ses journaux ;
+2. `metriques.py` (service `com.cryptoagent.metriques`) les recopie toutes les 5 s dans `donnees/agent.db` (SQLite, 30 jours d'historique) ;
+3. Grafana lit cette base avec le greffon SQLite (`frser-sqlite-datasource` 4.0.6).
+
+La source de données et le tableau de bord sont **provisionnés depuis le projet**, sans aucune manipulation dans Grafana :
+- `grafana/provisioning/` : déclaration de la source de données et du dossier des tableaux de bord ;
+- `grafana/generer_tableau.py` : génère `grafana/tableaux/agent.json`. Après une modification, relancer le script : Grafana recharge le tableau en 30 s.
+
+**Installation** (déjà faite sur ce Mac) :
+
+```bash
+./grafana/installer_grafana.sh    # télécharge Grafana et le greffon, vérifie les empreintes SHA-256
+./installer_service.sh papier     # lance l'export et Grafana à la place de l'ancien tableau Python
+```
+
+Le compte `admin` a un mot de passe aléatoire, enregistré dans `.env` (`GRAFANA_ADMIN_PASSWORD`). Il ne sert qu'à modifier Grafana : la consultation se fait sans connexion. L'ancien tableau de bord Python reste disponible à la main avec `.venv/bin/python dashboard.py` (port 8050).

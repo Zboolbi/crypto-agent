@@ -1,7 +1,8 @@
 #!/bin/bash
 # Arrête et retire l'agent et le tableau de bord. Les positions ouvertes restent sur l'exchange (avec leurs stops).
 MODE="${1:-papier}"
-for label in "com.cryptoagent.$MODE" "com.cryptoagent.dashboard" "com.cryptoagent.funding" "com.cryptoagent.tendance"; do
+for label in "com.cryptoagent.$MODE" "com.cryptoagent.dashboard" "com.cryptoagent.funding" "com.cryptoagent.tendance" \
+             "com.cryptoagent.metriques" "com.cryptoagent.grafana"; do
   PLIST="$HOME/Library/LaunchAgents/$label.plist"
   [ -f "$PLIST" ] || continue
   launchctl unload -w "$PLIST" 2>/dev/null || true

@@ -1,0 +1,1877 @@
+{
+ "uid": "crypto-agent",
+ "title": "Crypto Agent",
+ "tags": [
+  "crypto",
+  "agent"
+ ],
+ "timezone": "browser",
+ "refresh": "5s",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "schemaVersion": 39,
+ "version": 1,
+ "editable": false,
+ "graphTooltip": 1,
+ "panels": [
+  {
+   "id": 1,
+   "type": "row",
+   "title": "Vue d'ensemble · portefeuilles fictifs (mode papier)",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Valeur",
+   "description": "Somme des trois portefeuilles fictifs (scalping, tendance, financement).",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT valeur AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT valeur AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5794F2"
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 3,
+   "type": "stat",
+   "title": "Gain total",
+   "description": "Valeur actuelle moins capital de départ, positions ouvertes comprises.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'total' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Scalping",
+   "description": "Court terme et long terme (30 s à 10 min) réunis.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'scalping' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'scalping' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 5,
+   "type": "stat",
+   "title": "Tendance",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'tendance' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'tendance' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 6,
+   "type": "stat",
+   "title": "Financement",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'financement' ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT valeur - depart AS v FROM valeurs WHERE strategie = 'financement' ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 7,
+   "type": "stat",
+   "title": "Agent",
+   "description": "État du flux temps réel du scalping.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT CASE WHEN en_ligne = 1 AND ts > strftime('%s','now') - 30 THEN 'EN LIGNE' ELSE 'ARRÊTÉ' END AS v FROM sante ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT CASE WHEN en_ligne = 1 AND ts > strftime('%s','now') - 30 THEN 'EN LIGNE' ELSE 'ARRÊTÉ' END AS v FROM sante ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       }
+      ]
+     },
+     "unit": "none",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "EN LIGNE": {
+         "color": "#73BF69",
+         "index": 0
+        },
+        "ARRÊTÉ": {
+         "color": "#F2495C",
+         "index": 1
+        }
+       }
+      }
+     ]
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "/^v$/",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Gain / perte par stratégie ($)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 5,
+    "w": 16,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT CAST(ts / MAX(5, ($__to - $__from) / 600000) AS INTEGER) * MAX(5, ($__to - $__from) / 600000) AS time, MAX(CASE WHEN strategie = 'scalping' THEN valeur - depart END) AS \"Scalping\", MAX(CASE WHEN strategie = 'tendance' THEN valeur - depart END) AS \"Tendance\", MAX(CASE WHEN strategie = 'financement' THEN valeur - depart END) AS \"Financement\", MAX(CASE WHEN strategie = 'total' THEN valeur - depart END) AS \"Total\" FROM valeurs WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY 1 ORDER BY 1",
+     "queryText": "SELECT CAST(ts / MAX(5, ($__to - $__from) / 600000) AS INTEGER) * MAX(5, ($__to - $__from) / 600000) AS time, MAX(CASE WHEN strategie = 'scalping' THEN valeur - depart END) AS \"Scalping\", MAX(CASE WHEN strategie = 'tendance' THEN valeur - depart END) AS \"Tendance\", MAX(CASE WHEN strategie = 'financement' THEN valeur - depart END) AS \"Financement\", MAX(CASE WHEN strategie = 'total' THEN valeur - depart END) AS \"Total\" FROM valeurs WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY 1 ORDER BY 1",
+     "timeColumns": [
+      "time"
+     ]
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "unit": "currencyUSD",
+     "decimals": 2,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "spanNulls": true
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Scalping"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#5794F2"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Tendance"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#FF9830"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Financement"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#B877D9"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Total"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "#73BF69"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 9,
+   "type": "stat",
+   "title": "Santé de l'agent",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 5,
+    "w": 8,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT flux_msg_s AS \"Flux (msg/s)\", retard_ms AS \"Retard (ms)\", traitement_us AS \"Traitement (µs)\", reconnexions AS \"Reconnexions\", contrats AS \"Contrats suivis\", fantomes_actifs AS \"Fantômes en cours\", positions AS \"Positions scalping\" FROM sante ORDER BY ts DESC LIMIT 1",
+     "queryText": "SELECT flux_msg_s AS \"Flux (msg/s)\", retard_ms AS \"Retard (ms)\", traitement_us AS \"Traitement (µs)\", reconnexions AS \"Reconnexions\", contrats AS \"Contrats suivis\", fantomes_actifs AS \"Fantômes en cours\", positions AS \"Positions scalping\" FROM sante ORDER BY ts DESC LIMIT 1",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5794F2"
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "orientation": "horizontal"
+   }
+  },
+  {
+   "id": 10,
+   "type": "row",
+   "title": "Scalping · ⚡ court terme (20 s à 3 min) et ⏱ long terme (30 s à 10 min)",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 14,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "id": 11,
+   "type": "stat",
+   "title": "⚡ Court terme · synthèse sur la période",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 15,
+    "w": 12,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT COUNT(*) AS \"Trades\", ROUND(100.0 * SUM(pnl > 0) / MAX(COUNT(*), 1), 1) AS \"Gagnants (%)\", ROUND(SUM(pnl), 2) AS \"Résultat ($)\", ROUND(AVG(net_bps), 1) AS \"Net / trade (pb)\", SUM(exploration) AS \"Exploration\" FROM trades WHERE strategie = 'court' AND ts >= $__from / 1000 AND ts <= $__to / 1000",
+     "queryText": "SELECT COUNT(*) AS \"Trades\", ROUND(100.0 * SUM(pnl > 0) / MAX(COUNT(*), 1), 1) AS \"Gagnants (%)\", ROUND(SUM(pnl), 2) AS \"Résultat ($)\", ROUND(AVG(net_bps), 1) AS \"Net / trade (pb)\", SUM(exploration) AS \"Exploration\" FROM trades WHERE strategie = 'court' AND ts >= $__from / 1000 AND ts <= $__to / 1000",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5794F2"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "Résultat.*|Net.*"
+      },
+      "properties": [
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value_and_name"
+   }
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "⚡ Court terme · résultat de chaque trade ($)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 19,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT ts AS time, pnl AS \"Résultat\" FROM trades WHERE strategie = 'court' AND ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts",
+     "queryText": "SELECT ts AS time, pnl AS \"Résultat\" FROM trades WHERE strategie = 'court' AND ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts",
+     "timeColumns": [
+      "time"
+     ]
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2,
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 1,
+      "thresholdsStyle": {
+       "mode": "off"
+      },
+      "gradientMode": "scheme"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "tooltip": {
+     "mode": "single"
+    }
+   }
+  },
+  {
+   "id": 13,
+   "type": "table",
+   "title": "⚡ Court terme · positions ouvertes",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 27,
+    "w": 12,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT crypto AS \"Crypto\", variante AS \"Variante\", etat AS \"État\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'court'",
+     "queryText": "SELECT crypto AS \"Crypto\", variante AS \"Variante\", etat AS \"État\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'court'",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Taille"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 2
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 14,
+   "type": "stat",
+   "title": "⏱ Long terme · synthèse sur la période",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 15,
+    "w": 12,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT COUNT(*) AS \"Trades\", ROUND(100.0 * SUM(pnl > 0) / MAX(COUNT(*), 1), 1) AS \"Gagnants (%)\", ROUND(SUM(pnl), 2) AS \"Résultat ($)\", ROUND(AVG(net_bps), 1) AS \"Net / trade (pb)\", SUM(exploration) AS \"Exploration\" FROM trades WHERE strategie = 'longue' AND ts >= $__from / 1000 AND ts <= $__to / 1000",
+     "queryText": "SELECT COUNT(*) AS \"Trades\", ROUND(100.0 * SUM(pnl > 0) / MAX(COUNT(*), 1), 1) AS \"Gagnants (%)\", ROUND(SUM(pnl), 2) AS \"Résultat ($)\", ROUND(AVG(net_bps), 1) AS \"Net / trade (pb)\", SUM(exploration) AS \"Exploration\" FROM trades WHERE strategie = 'longue' AND ts >= $__from / 1000 AND ts <= $__to / 1000",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#B877D9"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "Résultat.*|Net.*"
+      },
+      "properties": [
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value_and_name"
+   }
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "⏱ Long terme · résultat de chaque trade ($)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 19,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT ts AS time, pnl AS \"Résultat\" FROM trades WHERE strategie = 'longue' AND ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts",
+     "queryText": "SELECT ts AS time, pnl AS \"Résultat\" FROM trades WHERE strategie = 'longue' AND ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts",
+     "timeColumns": [
+      "time"
+     ]
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD",
+     "decimals": 2,
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 1,
+      "thresholdsStyle": {
+       "mode": "off"
+      },
+      "gradientMode": "scheme"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "showLegend": false
+    },
+    "tooltip": {
+     "mode": "single"
+    }
+   }
+  },
+  {
+   "id": 16,
+   "type": "table",
+   "title": "⏱ Long terme · positions ouvertes",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 27,
+    "w": 12,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT crypto AS \"Crypto\", variante AS \"Variante\", etat AS \"État\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'longue'",
+     "queryText": "SELECT crypto AS \"Crypto\", variante AS \"Variante\", etat AS \"État\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'longue'",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Taille"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 2
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 17,
+   "type": "row",
+   "title": "📈 Tendance et ⚖ financement (positions de plusieurs heures à plusieurs jours)",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 33,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "id": 18,
+   "type": "table",
+   "title": "📈 Tendance · positions ouvertes",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 34,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT crypto AS \"Crypto\", variante AS \"Sens\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'tendance' ORDER BY pnl DESC",
+     "queryText": "SELECT crypto AS \"Crypto\", variante AS \"Sens\", notionnel AS \"Taille\", entree AS \"Entrée\", actuel AS \"Actuel\", pnl AS \"P&L\" FROM positions WHERE strategie = 'tendance' ORDER BY pnl DESC",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Taille"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 2
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 19,
+   "type": "table",
+   "title": "⚖ Financement · positions ouvertes",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 34,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT crypto AS \"Contrat\", notionnel AS \"Taille\", pnl AS \"Financement encaissé\" FROM positions WHERE strategie = 'financement'",
+     "queryText": "SELECT crypto AS \"Contrat\", notionnel AS \"Taille\", pnl AS \"Financement encaissé\" FROM positions WHERE strategie = 'financement'",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Financement encaissé"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Taille"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 0
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Financement encaissé"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 4
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 20,
+   "type": "row",
+   "title": "Trades, sorties et cryptos",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 42,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "id": 21,
+   "type": "table",
+   "title": "Derniers trades (toutes stratégies)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 43,
+    "w": 24,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT ts AS \"Heure\", strategie AS \"Stratégie\", crypto AS \"Crypto\", CASE WHEN exploration = 1 THEN 'exploration · ' ELSE '' END || variante AS \"Variante\", duree_s AS \"Durée (s)\", net_bps AS \"Net (pb)\", pnl AS \"P&L\", raison AS \"Sortie\" FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts DESC LIMIT 200",
+     "queryText": "SELECT ts AS \"Heure\", strategie AS \"Stratégie\", crypto AS \"Crypto\", CASE WHEN exploration = 1 THEN 'exploration · ' ELSE '' END || variante AS \"Variante\", duree_s AS \"Durée (s)\", net_bps AS \"Net (pb)\", pnl AS \"P&L\", raison AS \"Sortie\" FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 ORDER BY ts DESC LIMIT 200",
+     "timeColumns": [
+      "Heure"
+     ]
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Net (pb)"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "P&L"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "currencyUSD"
+       },
+       {
+        "id": "decimals",
+        "value": 2
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Durée (s)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "s"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Net (pb)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  },
+  {
+   "id": 22,
+   "type": "barchart",
+   "title": "Résultat par raison de sortie ($)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 52,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT CASE WHEN raison LIKE 'durée max%' THEN 'durée max' ELSE raison END AS \"Sortie\", ROUND(SUM(pnl), 2) AS \"Résultat\", COUNT(*) AS \"Trades\" FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY 1 ORDER BY 2",
+     "queryText": "SELECT CASE WHEN raison LIKE 'durée max%' THEN 'durée max' ELSE raison END AS \"Sortie\", ROUND(SUM(pnl), 2) AS \"Résultat\", COUNT(*) AS \"Trades\" FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY 1 ORDER BY 2",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Trades"
+      },
+      "properties": [
+       {
+        "id": "custom.hideFrom",
+        "value": {
+         "viz": true,
+         "legend": true,
+         "tooltip": false
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "orientation": "horizontal",
+    "xField": "Sortie",
+    "showValue": "always",
+    "legend": {
+     "showLegend": false
+    }
+   }
+  },
+  {
+   "id": 23,
+   "type": "barchart",
+   "title": "Résultat par crypto : 8 meilleures et 8 pires ($)",
+   "description": "",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 52,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "WITH r AS (SELECT crypto, ROUND(SUM(pnl), 2) AS total FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY crypto) SELECT * FROM (SELECT crypto AS \"Crypto\", total AS \"Résultat\" FROM r ORDER BY total DESC LIMIT 8) UNION SELECT * FROM (SELECT crypto, total FROM r ORDER BY total ASC LIMIT 8) ORDER BY 2 DESC",
+     "queryText": "WITH r AS (SELECT crypto, ROUND(SUM(pnl), 2) AS total FROM trades WHERE ts >= $__from / 1000 AND ts <= $__to / 1000 GROUP BY crypto) SELECT * FROM (SELECT crypto AS \"Crypto\", total AS \"Résultat\" FROM r ORDER BY total DESC LIMIT 8) UNION SELECT * FROM (SELECT crypto, total FROM r ORDER BY total ASC LIMIT 8) ORDER BY 2 DESC",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2495C",
+        "value": null
+       },
+       {
+        "color": "#73BF69",
+        "value": 0
+       }
+      ]
+     },
+     "unit": "currencyUSD"
+    },
+    "overrides": []
+   },
+   "options": {
+    "orientation": "horizontal",
+    "xField": "Crypto",
+    "showValue": "auto",
+    "legend": {
+     "showLegend": false
+    }
+   }
+  },
+  {
+   "id": 24,
+   "type": "row",
+   "title": "Apprentissage",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 60,
+    "w": 24,
+    "h": 1
+   }
+  },
+  {
+   "id": 25,
+   "type": "table",
+   "title": "Ce que l'agent a appris : une ligne par variante (famille / profil / entrée)",
+   "description": "« Annoncé → réel » : calibrage des probabilités. « Net moyen » : résultat net réel moyen des trades fantômes. Une variante ne trade avec du capital que si sa validation hors échantillon dépasse 1 pb.",
+   "datasource": {
+    "type": "frser-sqlite-datasource",
+    "uid": "agent-sqlite"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 61,
+    "w": 24,
+    "h": 12
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "frser-sqlite-datasource",
+      "uid": "agent-sqlite"
+     },
+     "queryType": "table",
+     "rawQueryText": "SELECT strategie AS \"Stratégie\", variante AS \"Variante\", exemples AS \"Exemples\", gagnants * 100 AS \"Gagnants (%)\", annonce * 100 AS \"Annoncé (%)\", reel * 100 AS \"Réel (%)\", net_moyen AS \"Net moyen (pb)\", execution * 100 AS \"Ordres limite exécutés (%)\", validation_bps AS \"Validation (pb)\", validation_n AS \"Cas validés\", CASE WHEN valide = 1 THEN 'oui' ELSE 'non' END AS \"Trade réel autorisé\" FROM modeles ORDER BY valide DESC, validation_bps DESC",
+     "queryText": "SELECT strategie AS \"Stratégie\", variante AS \"Variante\", exemples AS \"Exemples\", gagnants * 100 AS \"Gagnants (%)\", annonce * 100 AS \"Annoncé (%)\", reel * 100 AS \"Réel (%)\", net_moyen AS \"Net moyen (pb)\", execution * 100 AS \"Ordres limite exécutés (%)\", validation_bps AS \"Validation (pb)\", validation_n AS \"Cas validés\", CASE WHEN valide = 1 THEN 'oui' ELSE 'non' END AS \"Trade réel autorisé\" FROM modeles ORDER BY valide DESC, validation_bps DESC",
+     "timeColumns": []
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Net moyen (pb)"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Validation (pb)"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "#F2495C",
+           "value": null
+          },
+          {
+           "color": "#73BF69",
+           "value": 0
+          }
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "thresholds"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Gagnants (%)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Annoncé (%)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Réel (%)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Net moyen (pb)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Ordres limite exécutés (%)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Validation (pb)"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "none"
+       },
+       {
+        "id": "decimals",
+        "value": 1
+       }
+      ]
+     }
+    ]
+   },
+   "options": {}
+  }
+ ],
+ "description": "Agent de trading crypto en mode papier : données exportées par metriques.py."
+}

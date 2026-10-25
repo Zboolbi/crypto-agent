@@ -18,3 +18,4 @@ point_de_depart.json
 *.session-*
 *.ancien
 *.tmp
+donnees/

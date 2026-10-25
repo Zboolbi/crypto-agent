@@ -1,0 +1,11 @@
+# Source de données provisionnée : base SQLite remplie par metriques.py.
+apiVersion: 1
+datasources:
+  - name: Agent crypto
+    uid: agent-sqlite
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    editable: false
+    jsonData:
+      path: $CRYPTO_AGENT_DB
