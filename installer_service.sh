@@ -64,6 +64,11 @@ GF_BASE="$HOME/.local/share/crypto-grafana"
 GF_HOME="$(ls -d "$GF_BASE"/grafana-* 2>/dev/null | tail -1 || true)"
 plist "com.cryptoagent.metriques" "$DIR/logs/metriques.log" \
   "<string>$PY</string><string>$DIR/metriques.py</string><string>--mode</string><string>$MODE</string>"
+# Envoi vers Grafana Cloud, si les identifiants ont été saisis (python3 grafana_cloud.py cles).
+if grep -q '^GRAFANA_CLOUD_TOKEN=' "$DIR/.env" 2>/dev/null; then
+  plist "com.cryptoagent.grafana-cloud" "$DIR/logs/grafana_cloud.log" \
+    "<string>$PY</string><string>$DIR/grafana_cloud.py</string><string>lancer</string>"
+fi
 if [ -n "$GF_HOME" ] && [ -f "$GF_BASE/crypto-agent.ini" ]; then
   launchctl unload "$AGENTS/$DASH.plist" 2>/dev/null || true
   rm -f "$AGENTS/$DASH.plist"
