@@ -225,6 +225,36 @@ class ValidationTest(unittest.TestCase):
         self.assertEqual(len(sc.state["validation"]["elan/eclair/marche"]), 1)
 
 
+class BudgetTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sc = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=self.tmp.name)
+        self.sc.coins = {c: {"base": c} for c in ("A", "B", "C", "D")}
+        self.sc.books = {c: book() for c in self.sc.coins}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_ten_percent_per_trade_and_twenty_five_percent_engaged(self):
+        sc = self.sc
+        for c in sc.coins:
+            sc.open(c, 0, "short", PROFILE, False, "elan/eclair/marche", [0.0] * len(FEATURES), 0.9, 6, 12, 5)
+        sizes = [s.notional for s in sc.trades.values()]
+        self.assertEqual(sizes[:2], [1000.0, 1000.0], "10 % du capital par trade")
+        self.assertAlmostEqual(sum(sizes), 2500.0, msg="25 % du capital engagés au total")
+        self.assertEqual(len(sizes), 3, "le 4e trade n'a plus de place (reste < 10 $)")
+
+    def test_new_session_keeps_knowledge(self):
+        sc = self.sc
+        sc.state["cash"], sc.state["stats"]["trades"] = 9000.0, 42
+        sc.state["validation"]["elan/eclair/marche"] = [1.0] * 60
+        sc.state["cryptos"]["BTCUSDT"] = {"edge": 2.0, "n": 50, "pause_jusqua": 9e15, "reel": [-20.0]}
+        sc.new_session()
+        self.assertEqual((sc.state["cash"], sc.state["stats"]["trades"]), (CFG["capital_initial"], 0))
+        self.assertEqual(len(sc.state["validation"]["elan/eclair/marche"]), 60, "validation conservée")
+        self.assertFalse(sc.paused("BTCUSDT", 0), "quarantaine levée")
+
+
 class ExplorationTest(unittest.TestCase):
     def make(self, mode="papier", **over):
         self.tmp = tempfile.TemporaryDirectory()

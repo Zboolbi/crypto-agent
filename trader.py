@@ -97,8 +97,9 @@ DEFAULT_CONFIG = {
     "scalp_pas_max_bps": 3,            # contrat exclu si son pas de prix dépasse 3 pb
     "scalp_sortie_flux": 0.8,          # sortie anticipée si les achats dominent nettement
     "scalp_pause_s": 0,                # 0 = peut reshorter immédiatement après une sortie
-    "scalp_taille_min_pct": 5,         # taille selon la confiance du modèle, en % du capital
-    "scalp_taille_max_pct": 60,
+    "scalp_taille_min_pct": 2,         # taille selon la confiance du modèle, en % du capital
+    "scalp_taille_max_pct": 10,        # 10 % du capital au plus par trade
+    "scalp_exposition_max_pct": 25,    # 25 % du capital engagés au plus, toutes positions confondues
     "scalp_ev_min_bps": 1.0,           # gain espéré minimal après frais pour un trade réel
     "scalp_validation_min": 50,        # trades fantômes « choisis » requis pour valider une variante
     "scalp_validation_min_bps": 1.0,   # leur résultat net moyen doit dépasser ce seuil
@@ -108,11 +109,11 @@ DEFAULT_CONFIG = {
     "scalp_positions_max": 0,          # 0 = pas de limite : seul le levier borne l'exposition
     "scalp_long": False,               # short uniquement
     "scalp_exploration": True,         # trades réels de petite taille pendant et après l'apprentissage
-    "scalp_exploration_taille_pct": 2,  # taille d'un trade d'exploration, en % du capital
+    "scalp_exploration_taille_pct": 10,  # taille d'un trade d'exploration, en % du capital
     "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
     "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
     "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
-    "scalp_exploration_budget_jour_pct": 1,  # pertes d'exploration tolérées par jour, en % du capital (0 = sans limite)
+    "scalp_exploration_budget_jour_pct": 25,  # pertes d'exploration tolérées par jour, en % du capital (0 = sans limite)
     # -- arbitrage du taux de financement (funding.py) --
     "funding_capital": 10000,          # capital fictif dédié ($)
     "funding_positions_max": 5,        # réglages issus du balayage sur 11 mois de taux réels

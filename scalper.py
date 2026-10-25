@@ -321,6 +321,9 @@ class Scalper:
             os.replace(self.state_path, self.state_path + ".ancien")
             if os.path.exists(self.journal_path):
                 os.replace(self.journal_path, self.journal_path + ".ancien")
+        return self._fresh_state()
+
+    def _fresh_state(self):
         cap = self.cfg["capital_initial"]
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
                 "modeles": {}, "validation": {}, "version_modeles": 3, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
@@ -610,7 +613,8 @@ class Scalper:
         cfg = self.cfg
         eq = self.equity_cache
         pct = cfg["scalp_exploration_taille_pct"] if explore else self.size_pct(p, win, loss)
-        notional = min(eq * pct / 100, eq * cfg["levier_max"] - self.exposure())
+        # Plafonds : taille d'un trade (pct) et part du capital engagée au total.
+        notional = min(eq * pct / 100, eq * cfg["scalp_exposition_max_pct"] / 100 - self.exposure())
         if notional < 10:
             return
         sim = SimTrade(side, t, self.books[c], prof, cfg, maker, key, features=x, p=p, notional=notional,
@@ -913,6 +917,24 @@ class Scalper:
                 time.sleep(delay)
                 delay = min(delay * 2, 30)
 
+    def new_session(self):
+        """Portefeuille neuf (capital initial, statistiques, journal, courbe) ; le savoir appris est conservé."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
+        for path in (self.journal_path, self.curve_path, self.live_path):
+            if os.path.exists(path):
+                os.replace(path, "{}.session-{}".format(path, stamp))
+        fresh = self._fresh_state()
+        kept = {k: self.state[k] for k in ("modeles", "validation", "remplissage", "cryptos", "version_modeles")
+                if k in self.state}
+        for c in kept.get("cryptos", {}).values():  # quarantaines levées pour la nouvelle session
+            c.pop("pause_jusqua", None)
+            c.pop("reel", None)
+        fresh.update(kept)
+        self.state = fresh
+        self.save()
+        return "Nouvelle session : {} $ fictifs, journal archivé (.session-{}), modèles et validation conservés.".format(
+            self.cfg["capital_initial"], stamp)
+
     def acquire_lock(self):
         self._lock = open(os.path.join(self.state_dir, ".scalper_{}.lock".format(self.mode)), "w")
         try:
@@ -1089,7 +1111,8 @@ def main():
     parser = argparse.ArgumentParser(description="Scalping temps réel qui apprend de ses erreurs.")
     parser.add_argument("--mode", choices=["papier", "testnet", "reel"], default="papier")
     parser.add_argument("--je-confirme-le-risque", action="store_true")
-    parser.add_argument("cmd", nargs="?", default="lancer", choices=["lancer", "solde", "bilan", "reset"])
+    parser.add_argument("cmd", nargs="?", default="lancer",
+                        choices=["lancer", "solde", "bilan", "nouvelle-session", "reset"])
     parser.add_argument("--suivre", action="store_true", help="solde rafraîchi chaque seconde")
     args = parser.parse_args()
     if args.cmd == "solde":
@@ -1101,6 +1124,13 @@ def main():
     sc = Scalper(args.mode)
     if args.cmd == "bilan":
         sc.show()
+    elif args.cmd == "nouvelle-session":
+        try:
+            sc.acquire_lock()
+        except AlreadyRunning as e:
+            print("Nouvelle session impossible : {}. Arrêtez d'abord l'agent.".format(e))
+            return
+        print(sc.new_session())
     elif args.cmd == "reset":
         try:
             sc.acquire_lock()
