@@ -8,8 +8,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import funding  # noqa: E402
-import trader  # noqa: E402
+import funding
+import trader
 
 CFG = json.loads(json.dumps(trader.DEFAULT_CONFIG))
 

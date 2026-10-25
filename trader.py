@@ -106,6 +106,9 @@ DEFAULT_CONFIG = {
     "scalp_exposition_max_pct": 25,    # 25 % du capital engagés au plus, toutes positions confondues
     "scalp_exposition_court_pct": 15,  # dont 15 % au plus pour le scalping court…
     "longue_exposition_pct": 10,       # … et 10 % au plus pour les positions longues
+    # -- stratégie de tendance (trader.py auto) : mêmes plafonds que l'agent --
+    "tendance_taille_max_pct": 10,     # 10 % du capital au plus par position
+    "tendance_exposition_max_pct": 25,  # 25 % du capital engagés au plus
     # -- stratégie longue (scalper.py, en parallèle du scalping court) --
     "longue_active": True,
     "scalp_profils_longs": [           # objectifs bien au-dessus des frais (4 à 10 pb l'aller-retour)
@@ -130,8 +133,8 @@ DEFAULT_CONFIG = {
     "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
     "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
     "scalp_exploration_reel": False,   # exploration interdite en mode réel sauf activation explicite
-    "scalp_exploration_bonus_bps": 20,  # exploration ciblée : bonus pour les variantes peu connues (pb / √(1+n))
-    "scalp_exploration_ev_min_bps": -3,  # pas d'exploration si même le score optimiste est en dessous
+    "scalp_exploration_bonus_bps": 10,  # exploration ciblée : bonus pour les variantes peu connues (pb / √(1+n))
+    "scalp_exploration_ev_min_bps": 0,  # pas d'exploration si même le score optimiste est en dessous
     "scalp_exploration_budget_jour_pct": 25,  # pertes d'exploration tolérées par jour, en % du capital (0 = sans limite)
     # -- arbitrage du taux de financement (funding.py) --
     "funding_capital": 10000,          # capital fictif dédié ($)
@@ -298,7 +301,7 @@ def tradable(coin, cfg):
 
 
 def score_bar(score, width=10):
-    n = int(round(abs(score) / 100 * width))
+    n = round(abs(score) / 100 * width)
     bar = ("█" * n).ljust(width, "·")
     return green(bar) if score > 0 else red(bar)
 
@@ -461,13 +464,13 @@ class CcxtBroker:
     def open(self, coin, side, notional, price, leverage):
         m = self.market(coin)
         try:
-            self.ex.set_leverage(max(1, int(math.ceil(leverage))), m)
+            self.ex.set_leverage(max(1, math.ceil(leverage)), m)
         except Exception:
             pass  # certains exchanges gèrent le levier autrement
         qty = float(self.ex.amount_to_precision(m, notional / price))
         min_qty = ((self.ex.markets[m].get("limits") or {}).get("amount") or {}).get("min") or 0
         if qty <= 0 or qty < min_qty:
-            raise TradingError("Montant trop faible pour {} (minimum {}).".format(m, min_qty))
+            raise TradingError(f"Montant trop faible pour {m} (minimum {min_qty}).")
         order = self.ex.create_order(m, "market", "buy" if side == "long" else "sell", qty)
         fill = float(order.get("average") or order.get("price") or price)
         fee = (order.get("fee") or {}).get("cost")
@@ -569,11 +572,11 @@ def setup_keys():
         print("  Annulé.")
         return
     with open(ENV_PATH, "w", encoding="utf-8") as f:
-        f.write("EXCHANGE_API_KEY={}\nEXCHANGE_API_SECRET={}\n".format(key, secret))
+        f.write(f"EXCHANGE_API_KEY={key}\nEXCHANGE_API_SECRET={secret}\n")
     os.chmod(ENV_PATH, 0o600)
     cfg["exchange"] = ex
     save_config(cfg)
-    print(green("  Clés enregistrées dans .env (droits 600). L'agent se connectera seul à {}.".format(ex)))
+    print(green(f"  Clés enregistrées dans .env (droits 600). L'agent se connectera seul à {ex}."))
 
 
 # --------------------------------------------------------------------------- #
@@ -588,8 +591,9 @@ class Trader:
         self.cg = CoinGecko()
         self.md = MarketData("bybit" if "bybit" in self.cfg["exchange"] else "binance")
         self.broker = PaperBroker(self.cfg) if mode == "papier" else CcxtBroker(self.cfg, mode == "testnet")
-        self.state_path = os.path.join(HERE, "portefeuille_{}.json".format(mode))
-        self.journal_path = os.path.join(HERE, "journal_{}.csv".format(mode))
+        self.state_path = os.path.join(HERE, f"portefeuille_{mode}.json")
+        self.journal_path = os.path.join(HERE, f"journal_{mode}.csv")
+        self.live_path = os.path.join(HERE, f"etat_tendance_{mode}.json")
         self.state = self._load_state()
         self.coins, self.tick, self.candles = {}, {}, {}
         self.rank_source = None
@@ -647,7 +651,7 @@ class Trader:
             for coin in self.coins.values():
                 if (coin.get(key) or "").lower() == q:
                     return coin
-        raise TradingError("« {} » ne fait pas partie du top 100.".format(query))
+        raise TradingError(f"« {query} » ne fait pas partie du top 100.")
 
     def universe(self):
         return [c for c in self.coins.values()
@@ -671,7 +675,7 @@ class Trader:
 
     def price(self, contract):
         if contract not in self.tick:
-            raise TradingError("Pas de prix pour {}.".format(contract))
+            raise TradingError(f"Pas de prix pour {contract}.")
         return self.tick[contract]["price"]
 
     def open_pnl(self):
@@ -729,7 +733,9 @@ class Trader:
         equity = self.equity()
         if notional is None:
             notional = equity * cfg["risque_par_trade_pct"] / 100 / (stop_pct / 100)
-        notional = min(notional, equity * cfg["levier_max"] - self.exposure())
+        # Plafonds : levier du profil, taille d'une position et part du capital engagée au total.
+        notional = min(notional, equity * cfg["tendance_taille_max_pct"] / 100,
+                       equity * min(cfg["levier_max"], cfg["tendance_exposition_max_pct"] / 100) - self.exposure())
         if notional < 10:
             raise TradingError("Plus de marge disponible (exposition max = {:.1f}× le capital).".format(
                 cfg["levier_max"]))
@@ -775,7 +781,7 @@ class Trader:
                      frais=round(fee, 4), pnl=round(net, 2), raison=reason)
         print("  ✕ Fermeture {} {} ({}) à {} → {}".format(
             pos["side"].upper(), pos["symbol"], reason, fmt_price(exit_price, CUR),
-            (green if net >= 0 else red)("{:+,.2f} $".format(net).replace(",", " "))))
+            (green if net >= 0 else red)(f"{net:+,.2f} $".replace(",", " "))))
         return net
 
     def close_position(self, key, reason="manuel"):
@@ -790,7 +796,7 @@ class Trader:
             try:
                 self.close_position(key, reason)
             except Exception as e:
-                print(red("  Échec de fermeture {} : {}".format(key, e)))
+                print(red(f"  Échec de fermeture {key} : {e}"))
 
     def sync_exchange(self):
         """Aligne le portefeuille local sur l'exchange (stops exécutés, positions ouvertes ailleurs)."""
@@ -811,7 +817,7 @@ class Trader:
             coin = next((c for c in self.coins.values()
                          if c.get("base") and "{}/USDT:USDT".format(c["base"]) == market), None)
             if not coin:
-                print(yellow("  Position {} inconnue sur l'exchange, laissée telle quelle.".format(market)))
+                print(yellow(f"  Position {market} inconnue sur l'exchange, laissée telle quelle."))
                 continue
             a = self.analyse_contract(coin["contract"])
             pos = new_position(lp["side"], lp["entry"] or self.price(coin["contract"]), lp["qty"],
@@ -885,9 +891,27 @@ class Trader:
                     print(dim("  " + str(e)))
                     if "marge" in str(e):
                         break
+        self.write_live()
         if verbose:
             self.show_portfolio()
         return signals
+
+    def write_live(self):
+        """État temps réel pour le tableau de bord et analyse.py : valeur latente comprise."""
+        open_pnl = self.open_pnl()
+        positions = [{"crypto": p["symbol"], "sens": p["side"], "notionnel": round(p["qty"] * p["entry"], 2),
+                      "entree": p["entry"], "actuel": self.tick.get(p["contract"], {}).get("price"),
+                      "stop": p["stop"], "objectif": p["tp"], "ouverte": p["opened"],
+                      "pnl": round(unrealized(p, self.tick[p["contract"]]["price"]), 2) if p["contract"] in self.tick else None}
+                     for p in self.state["positions"].values()]
+        snap = {"maj": time.time(), "mode": self.mode, "capital_initial": self.cfg["capital_initial"],
+                "valeur": round(self.equity(), 2), "realise": round(self.state["stats"]["pnl"], 2),
+                "latent": round(open_pnl, 2), "trades": self.state["stats"]["trades"],
+                "gagnants": self.state["stats"]["gagnants"], "positions": positions}
+        tmp = self.live_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snap, f)
+        os.replace(tmp, self.live_path)
 
     def maybe_reoptimize(self):
         h = self.cfg["reoptimisation_h"]
@@ -907,7 +931,7 @@ class Trader:
                     self.maybe_reoptimize()
                     self.cycle()
                 except (CoinGeckoError, DataError, TradingError) as e:
-                    print(red("  Erreur : {}".format(e)))
+                    print(red(f"  Erreur : {e}"))
                 n += 1
                 if cycles is None or n < cycles:
                     time.sleep(max(interval or self.cfg["intervalle_auto_s"], 30))
@@ -957,7 +981,7 @@ class Trader:
                 best, best_test = combo, t
             label = "L{score_entree_long} S{score_entree_short} stop×{multiplicateur_stop} " \
                     "gain×{ratio_gain_risque} sortie{score_sortie}".format(**combo)
-            print("  " + "  ".join([pad(label, 44), pad("{:+.1f}".format(obj), 10, True),
+            print("  " + "  ".join([pad(label, 44), pad(f"{obj:+.1f}", 10, True),
                                     pad(fmt_pct(t["ret"], 0), 11, True), pad("-{:.1f}%".format(t["dd"]), 9, True),
                                     pad(str(t["trades"]), 7, True), pad("{:.0f}%".format(t["win"]), 9, True)]))
         print(dim("  Réglages actuels en validation : {} · drawdown -{:.1f}% · {} trades".format(
@@ -968,9 +992,9 @@ class Trader:
             if apply:
                 self.cfg.update(best)
                 save_config(self.cfg)
-                print(green("  ✓ Nouveaux réglages appliqués : {}".format(best)))
+                print(green(f"  ✓ Nouveaux réglages appliqués : {best}"))
             else:
-                print(yellow("  Meilleurs réglages trouvés : {} (« optimiser --appliquer » pour les adopter)".format(best)))
+                print(yellow(f"  Meilleurs réglages trouvés : {best} (« optimiser --appliquer » pour les adopter)"))
         else:
             print(dim("  Les réglages actuels restent les meilleurs en validation : aucun changement."))
         self.save()
@@ -993,7 +1017,7 @@ class Trader:
         print(bold("  Backtest {} — {:.0f} jours de bougies {} — profil {}".format(
             coin["base"], days, self.cfg["bougies"], self.cfg["profil"])))
         print("  Rendement de la stratégie : {}".format(fmt_pct(r["ret"], 0)))
-        print("  Achat-conservation        : {}".format(fmt_pct(hold, 0)))
+        print(f"  Achat-conservation        : {fmt_pct(hold, 0)}")
         print("  Drawdown maximal          : {}".format(red("-{:.1f}%".format(r["dd"]))))
         if r["trades"]:
             print("  Trades : {} · gagnants {:.0f}%".format(r["trades"], r["wins"] / r["trades"] * 100))
@@ -1040,10 +1064,9 @@ class Trader:
         cap = self.cfg["capital_initial"]
         print()
         print(bold("  Portefeuille [{}] · profil {}".format(self.mode.upper(), self.cfg["profil"])))
-        line = "  Valeur : {}".format(bold(fmt_price(eq, CUR)))
+        line = f"  Valeur : {bold(fmt_price(eq, CUR))}"
         if self.mode == "papier":
-            line += "  ({} depuis le départ, capital initial {})".format(fmt_pct((eq / cap - 1) * 100, 0),
-                                                                      fmt_price(cap, CUR))
+            line += f"  ({fmt_pct((eq / cap - 1) * 100, 0)} depuis le départ, capital initial {fmt_price(cap, CUR)})"
         print(line)
         print("  Exposition : {} ({:.2f}× le capital, max {}×) · positions : {}{}".format(
             fmt_big(self.exposure(), CUR), self.exposure() / eq if eq else 0, self.cfg["levier_max"],
@@ -1075,7 +1098,7 @@ class Trader:
                 pad(fmt_big(pos["qty"] * pos["entry"], CUR), 10, True),
                 pad(fmt_price(pos["entry"], CUR), 13, True),
                 pad(fmt_price(price, CUR), 13, True),
-                pad("{} {}".format((green if pnl >= 0 else red)("{:+.2f}$".format(pnl)), fmt_pct(pct, 0)), 20, True),
+                pad("{} {}".format((green if pnl >= 0 else red)(f"{pnl:+.2f}$"), fmt_pct(pct, 0)), 20, True),
                 pad(fmt_price(pos["stop"], CUR), 13, True),
                 pad(fmt_price(pos["tp"], CUR), 13, True),
             ]))
@@ -1091,7 +1114,7 @@ class Trader:
             pnl = ""
             if r["pnl"]:
                 v = float(r["pnl"])
-                pnl = (green if v >= 0 else red)("{:+.2f}$".format(v))
+                pnl = (green if v >= 0 else red)(f"{v:+.2f}$")
             print("  {}  {:<10} {:<9} {:<5} {:>14}  {:>10}  {}".format(
                 dim(r["date"]), r["action"], r["crypto"], r["sens"], fmt_price(float(r["prix"]), CUR),
                 pnl, dim(r["raison"])))
@@ -1104,13 +1127,13 @@ class Trader:
         self.cfg.update(PROFILES[name])
         self.cfg["profil"] = name
         save_config(self.cfg)
-        print("  Profil {} appliqué.".format(bold(name)))
+        print(f"  Profil {bold(name)} appliqué.")
 
     def config_cmd(self, args):
         if len(args) >= 2:
             key, val = args[0], " ".join(args[1:])
             if key not in DEFAULT_CONFIG:
-                raise TradingError("Clé inconnue : {}".format(key))
+                raise TradingError(f"Clé inconnue : {key}")
             ref = DEFAULT_CONFIG[key]
             if isinstance(ref, bool):
                 val = val.lower() in ("1", "true", "oui", "vrai")
@@ -1122,7 +1145,7 @@ class Trader:
             save_config(self.cfg)
         print()
         for k, v in self.cfg.items():
-            print("  {:<28} {}".format(k, v))
+            print(f"  {k:<28} {v}")
 
     def reset(self):
         if self.mode != "papier":
@@ -1180,7 +1203,7 @@ class Trader:
                     self.show_trends(int(args[0]) if args else 20)
                 elif cmd in ("long", "short"):
                     if not args:
-                        print("  Usage : {} <crypto> [montant $]".format(cmd))
+                        print(f"  Usage : {cmd} <crypto> [montant $]")
                         continue
                     self.refresh()
                     self.open_position(self.resolve(args[0]), cmd, float(args[1]) if len(args) > 1 else None)
@@ -1217,11 +1240,11 @@ class Trader:
                 else:
                     print("  Commande inconnue. Tapez « aide ».")
             except (TradingError, CoinGeckoError, DataError) as e:
-                print(red("  Erreur : {}".format(e)))
+                print(red(f"  Erreur : {e}"))
             except ValueError as e:
-                print(red("  Paramètre invalide : {}".format(e)))
+                print(red(f"  Paramètre invalide : {e}"))
             except Exception as e:
-                print(red("  Erreur de l'exchange : {}".format(e)))
+                print(red(f"  Erreur de l'exchange : {e}"))
         print("  À bientôt 👋")
 
 
@@ -1232,7 +1255,8 @@ class Trader:
 
 class Tee:
     def __init__(self, stream, path):
-        self.stream, self.file = stream, open(path, "a", encoding="utf-8", buffering=1)
+        # Journal ouvert pour toute la durée du service.
+        self.stream, self.file = stream, open(path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
 
     def write(self, data):
         self.stream.write(data)
@@ -1250,11 +1274,11 @@ def service(mode):
     """Boucle sans fin : se connecte seul, se reconnecte après une panne, se ré-optimise."""
     os.makedirs(LOG_DIR, exist_ok=True)
     if sys.stdout.isatty():  # sous launchd, la sortie est déjà redirigée vers le journal
-        log = os.path.join(LOG_DIR, "agent_{}.log".format(mode))
+        log = os.path.join(LOG_DIR, f"agent_{mode}.log")
         sys.stdout = Tee(sys.stdout, log)
         sys.stderr = Tee(sys.stderr, log)
 
-    def stop(signum, frame):
+    def stop(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
 
@@ -1271,13 +1295,13 @@ def service(mode):
                         raise
                     except Exception as e:
                         busy = type(e).__name__ == "AlreadyRunning"
-                        print(red("  Scalping interrompu : {} — nouvel essai dans {} s.".format(e, 60 if busy else 5)))
+                        print(red(f"  Scalping interrompu : {e} — nouvel essai dans {60 if busy else 5} s."))
                         sys.stdout.flush()
                         time.sleep(60 if busy else 5)
                     continue
                 if trader is None:
                     trader = Trader(mode)
-                    print(green("  Connecté ({}, données {}).".format(trader.broker.name, trader.md.venues[0].name)))
+                    print(green(f"  Connecté ({trader.broker.name}, données {trader.md.venues[0].name})."))
                     backoff = 30
                 print(dim("\n  ── {} · cycle".format(datetime.now().strftime("%d/%m %H:%M:%S"))))
                 trader.maybe_reoptimize()
@@ -1287,7 +1311,7 @@ def service(mode):
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                print(red("  Erreur : {} — nouvelle connexion dans {} s.".format(e, backoff)))
+                print(red(f"  Erreur : {e} — nouvelle connexion dans {backoff} s."))
                 sys.stdout.flush()
                 trader = None
                 time.sleep(backoff)
@@ -1391,7 +1415,7 @@ def main():
         else:
             t.repl()
     except (TradingError, CoinGeckoError, DataError) as e:
-        print(red("Erreur : {}".format(e)), file=sys.stderr)
+        print(red(f"Erreur : {e}"), file=sys.stderr)
         sys.exit(1)
 
 

@@ -115,7 +115,10 @@
   <section class="panel s12 strat court"><h3>Court terme · derniers trades</h3><div class="scroll" id="trades_court"></div></section>
   <section class="panel s12 strat longue"><h3>Long terme · derniers trades</h3><div class="scroll" id="trades_longue"></div></section>
 
-  <section class="panel s12"><h3>Raisons de sortie <small>les deux stratégies</small></h3><canvas id="cReasons"></canvas></section>
+  <section class="panel s12 strat"><h3>📈 Tendance <small>positions de quelques heures · portefeuille fictif séparé</small></h3><div class="kpis" id="kpi_tendance"></div><div class="scroll" id="positions_tendance" style="margin-top:8px"></div></section>
+  <section class="panel s12 strat"><h3>⚖ Financement <small>comptant + perpétuel, plusieurs jours · portefeuille fictif séparé</small></h3><div class="kpis" id="kpi_financement"></div><div class="scroll" id="positions_financement" style="margin-top:8px"></div></section>
+
+  <section class="panel s12"><h3>Raisons de sortie <small>scalping court et long</small></h3><canvas id="cReasons"></canvas></section>
   <section class="panel s12"><h3>Cryptos <small>résultat moyen appris, pb</small></h3><canvas id="cCryptos"></canvas></section>
 
   <section class="panel s24"><h3>Ce que l'agent a appris <small>une ligne par variante : famille / profil / type d'entrée</small></h3>
@@ -285,6 +288,7 @@ function render() {
 
   drawCurve();
   for (const g of ['court', 'longue']) renderStrategy(g, data.strategies[g]);
+  renderSlow();
   const reasons = Object.entries(st.raisons).sort((a, b) => b[1] - a[1]);
   const rc = { objectif: C.green, stop: C.red, 'durée max': C.orange, 'flux inversé': C.purple };
   drawHBars('cReasons', reasons.map(([k, v]) => [k, v, k]), (v, k) => rc[k] || C.blue, v => nf(0).format(v));
@@ -300,6 +304,33 @@ function render() {
       td(m.annonce == null ? '—' : pct(m.annonce) + ' → <span class="' + (m.reel < m.annonce - .1 ? 'neg' : 'pos') + '">' + pct(m.reel) + '</span>', 'num'),
       td(m.execution == null ? '—' : pct(m.execution), 'num')]),
     'Aucun modèle entraîné pour l’instant.');
+}
+
+function renderSlow() {
+  const kpi = (label, value, klass = '') => `<div><span>${label}</span><b class="${klass}">${value}</b></div>`;
+  const age = s => s ? (data.maintenant - s.maj < 600 ? '' : ' (ancien)') : '';
+  const t = data.tendance, f = data.financement;
+  $('kpi_tendance').innerHTML = t ? [
+    kpi('Valeur', usd(t.valeur) + age(t)), kpi('Depuis le départ', sUsd(t.valeur - t.capital_initial), cls(t.valeur - t.capital_initial)),
+    kpi('Réalisé', sUsd(t.realise), cls(t.realise)), kpi('Latent', sUsd(t.latent), cls(t.latent)),
+    kpi('Trades fermés', t.trades + (t.trades ? ' · ' + pct(t.gagnants / t.trades) : '')),
+  ].join('') : '<div class="empty">Pas encore de données.</div>';
+  table('positions_tendance', [['Crypto'], ['Sens'], ['Taille', 'num'], ['Entrée', 'num'], ['Actuel', 'num'], ['P&L', 'num']],
+    (t ? t.positions : []).map(p => [td(`<b>${esc(p.crypto)}</b>`), td(p.sens === 'short' ? 'short' : 'long'),
+      td(usd(p.notionnel, 0), 'num'), td(nf(p.entree < 1 ? 5 : 2).format(p.entree), 'num'),
+      td(p.actuel == null ? '—' : nf(p.actuel < 1 ? 5 : 2).format(p.actuel), 'num'), td(sUsd(p.pnl), 'num ' + cls(p.pnl))]),
+    'Aucune position ouverte.');
+  const fs = f ? f.stats : null;
+  $('kpi_financement').innerHTML = f ? [
+    kpi('Valeur', usd(f.valeur) + age(f)), kpi('Depuis le départ', sUsd(f.valeur - f.capital_initial), cls(f.valeur - f.capital_initial)),
+    kpi('Financement encaissé', sUsd(fs.financement, 4), cls(fs.financement)), kpi('Frais payés', usd(fs.frais)),
+    kpi('Positions', f.positions.length),
+  ].join('') : '<div class="empty">Pas encore de données.</div>';
+  table('positions_financement', [['Contrat'], ['Taille', 'num'], ['Taux annuel', 'num'], ['Encaissé', 'num'], ['Depuis', 'num']],
+    (f ? f.positions : []).map(p => [td(`<b>${esc(p.symbole)}</b>`), td(usd(p.notionnel, 0), 'num'),
+      td(p.taux_annuel == null ? '—' : nf(1).format(p.taux_annuel) + ' %', 'num'), td(sUsd(p.financement, 4), 'num ' + cls(p.financement)),
+      td(nf(1).format(p.jours) + ' j', 'num')]),
+    'Aucune position ouverte.');
 }
 
 function renderStrategy(g, S) {

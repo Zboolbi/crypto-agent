@@ -84,8 +84,6 @@ class OnlineLogit:
         self.w, self.b = [0.0] * n, 0.0
         self.scaler = OnlineScaler(n)
         self.seen = 0
-        self.accuracy = 0.5    # taux de bonnes prédictions (moyenne mobile)
-        self.brier = 0.25      # erreur quadratique des probabilités (moyenne mobile)
         self.base_rate = 0.5   # part de trades gagnants observée (moyenne mobile)
         self.cal_n = [0.0] * CAL_BINS
         self.cal_w = [0.0] * CAL_BINS
@@ -95,21 +93,6 @@ class OnlineLogit:
     def predict(self, x):
         z = self.scaler.transform(x)
         return sigmoid(self.b + sum(w * v for w, v in zip(self.w, z)))
-
-    def calibrated(self, x):
-        """Probabilité corrigée par ce que le modèle a réellement obtenu.
-
-        La probabilité brute est rangée dans une tranche ; on renvoie le taux de gain observé
-        dans cette tranche, lissé vers le taux de base. Un contexte trop éloigné de ce que le
-        modèle a vu (variable à plus de NOVELTY_MAX écarts-types) renvoie le taux de base :
-        pas d'extrapolation sur l'inconnu.
-        """
-        z = self.scaler.transform(x)
-        raw = sigmoid(self.b + sum(w * v for w, v in zip(self.w, z)))
-        if max(abs(v) for v in z) > NOVELTY_MAX or self.seen < 50:
-            return self.base_rate, raw
-        i = min(int(raw * CAL_BINS), CAL_BINS - 1)
-        return (self.cal_w[i] + CAL_PRIOR * self.base_rate) / (self.cal_n[i] + CAL_PRIOR), raw
 
     def estimate(self, x):
         """Estimation calibrée sur les résultats réels : probabilité de gain, résultat net moyen (pb)
@@ -144,10 +127,7 @@ class OnlineLogit:
         if net is not None:
             self.cal_net[i] += net
             self.avg_net += 0.02 * (net - self.avg_net)
-        a = 0.02
-        self.accuracy += a * (float((p_before > 0.5) == bool(y)) - self.accuracy)
-        self.brier += a * ((p_before - y) ** 2 - self.brier)
-        self.base_rate += a * (y - self.base_rate)
+        self.base_rate += 0.02 * (y - self.base_rate)
 
         self.scaler.update(x)
         z = self.scaler.transform(x)
@@ -166,7 +146,7 @@ class OnlineLogit:
         return good, bad
 
     def to_dict(self):
-        return {"w": self.w, "b": self.b, "seen": self.seen, "accuracy": self.accuracy, "brier": self.brier,
+        return {"w": self.w, "b": self.b, "seen": self.seen,
                 "base_rate": self.base_rate, "cal_n": self.cal_n, "cal_w": self.cal_w,
                 "cal_net": self.cal_net, "avg_net": self.avg_net,
                 "scaler": {"count": self.scaler.count, "mean": self.scaler.mean, "m2": self.scaler.m2}}
@@ -177,7 +157,7 @@ class OnlineLogit:
         if not d or len(d.get("w", [])) != len(FEATURES):
             return m  # variables modifiées : on repart de zéro
         m.w, m.b, m.seen = d["w"], d["b"], d["seen"]
-        m.accuracy, m.brier, m.base_rate = d["accuracy"], d["brier"], d["base_rate"]
+        m.base_rate = d["base_rate"]
         if d.get("cal_net"):
             m.cal_n, m.cal_w, m.cal_net = d["cal_n"], d["cal_w"], d["cal_net"]
             m.avg_net = d.get("avg_net", 0.0)

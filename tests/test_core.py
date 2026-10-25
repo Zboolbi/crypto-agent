@@ -10,10 +10,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import scalper  # noqa: E402
-import trader  # noqa: E402
-from learner import FEATURES, OnlineLogit  # noqa: E402
-from sources import WebSocket  # noqa: E402
+import scalper
+import trader
+from learner import FEATURES, OnlineLogit
+from sources import WebSocket
 
 CFG = json.loads(json.dumps(trader.DEFAULT_CONFIG))
 PROFILE = {"nom": "eclair", "objectif_bps": 10, "stop_bps": 8, "duree_s": 20}
@@ -93,7 +93,6 @@ class LearnerTest(unittest.TestCase):
         for _ in range(3000):
             x = [rnd.gauss(0, 1) for _ in FEATURES]
             m.update(x, 1.0 if x[0] + 0.3 * rnd.gauss(0, 1) > 0 else 0.0)
-        self.assertGreater(m.accuracy, 0.8)
         self.assertGreater(m.predict([2.0] + [0.0] * (len(FEATURES) - 1)), 0.9)
         clone = OnlineLogit.from_dict(json.loads(json.dumps(m.to_dict())))
         x = [0.5] * len(FEATURES)
@@ -404,11 +403,13 @@ class LatencyTest(unittest.TestCase):
         self.assertEqual(s.state, "annule")
 
 
+LONG_PROFILE = {"nom": "une_min", "objectif_bps": 45, "stop_bps": 35, "duree_s": 60}
+
+
 class ExtensionTest(unittest.TestCase):
-    PROF = {"nom": "une_min", "objectif_bps": 45, "stop_bps": 35, "duree_s": 60}
 
     def open_short(self, b):
-        s = scalper.SimTrade("short", 0, b, self.PROF, CFG, False, "elan/une_min/marche", latency_ms=0)
+        s = scalper.SimTrade("short", 0, b, LONG_PROFILE, CFG, False, "elan/une_min/marche", latency_ms=0)
         self.assertEqual((s.state, s.entry), ("ouvert", 100.0))
         return s
 
@@ -503,9 +504,9 @@ class CalibrationTest(unittest.TestCase):
         for _ in range(3000):
             x = [rnd.gauss(0, 1) for _ in FEATURES]
             m.update(x, 1.0 if rnd.random() < 0.1 else 0.0)  # 10 % de gains quoi qu'il arrive
-        p, _ = m.calibrated([2.0] * len(FEATURES))
+        p = m.estimate([2.0] * len(FEATURES))["p"]
         self.assertLess(abs(p - 0.1), 0.08)
-        p_unknown, _ = m.calibrated([50.0] * len(FEATURES))
+        p_unknown = m.estimate([50.0] * len(FEATURES))["p"]
         self.assertAlmostEqual(p_unknown, m.base_rate)
 
 

@@ -74,8 +74,19 @@ def setup_logging():
 
 
 class Book:
-    __slots__ = ("bid", "ask", "bid_qty", "ask_qty", "bid_top", "ask_top", "last",
-                 "trades", "buy", "sell", "samples")
+    __slots__ = (
+        "ask",
+        "ask_qty",
+        "ask_top",
+        "bid",
+        "bid_qty",
+        "bid_top",
+        "buy",
+        "last",
+        "samples",
+        "sell",
+        "trades",
+    )
 
     def __init__(self):
         self.bid = self.ask = self.last = None
@@ -138,10 +149,43 @@ def model_key(family, profile, maker):
 
 
 class SimTrade:
-    __slots__ = ("side", "profile", "key", "features", "p", "notional", "maker_entry", "limit", "queue", "deadline",
-                 "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
-                 "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed",
-                 "explore", "lat", "active", "tp_active", "would", "extensions", "ext")
+    __slots__ = (
+        "active",
+        "closed",
+        "deadline",
+        "entry",
+        "exit",
+        "explore",
+        "ext",
+        "extensions",
+        "features",
+        "fee_bps",
+        "flow_exit",
+        "key",
+        "lat",
+        "limit",
+        "maker_bps",
+        "maker_entry",
+        "market",
+        "max_ms",
+        "notional",
+        "opened",
+        "order_id",
+        "p",
+        "profile",
+        "qty",
+        "queue",
+        "reason",
+        "side",
+        "sl",
+        "sl_id",
+        "state",
+        "taker_bps",
+        "tp",
+        "tp_active",
+        "tp_id",
+        "would",
+    )
 
     def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0,
                  latency_ms=None):
@@ -259,7 +303,7 @@ class SimTrade:
                     self.extensions += 1
                     self.max_ms += self.ext[1]
                 else:
-                    reason = "durée max" + (" (prolongée ×{})".format(self.extensions) if self.extensions else "")
+                    reason = "durée max" + (f" (prolongée ×{self.extensions})" if self.extensions else "")
                     self._close(t, book.ask if short else book.bid, False, reason)
 
     def should_extend(self, book):
@@ -291,10 +335,10 @@ class Scalper:
         self.mode = mode
         self.trader = T.Trader(mode, self.cfg)
         self.broker = self.trader.broker
-        self.state_path = os.path.join(state_dir, "portefeuille_scalp_{}.json".format(mode))
-        self.journal_path = os.path.join(state_dir, "journal_scalp_{}.csv".format(mode))
-        self.curve_path = os.path.join(state_dir, "courbe_scalp_{}.csv".format(mode))
-        self.live_path = os.path.join(state_dir, "etat_scalp_{}.json".format(mode))
+        self.state_path = os.path.join(state_dir, f"portefeuille_scalp_{mode}.json")
+        self.journal_path = os.path.join(state_dir, f"journal_scalp_{mode}.csv")
+        self.curve_path = os.path.join(state_dir, f"courbe_scalp_{mode}.csv")
+        self.live_path = os.path.join(state_dir, f"etat_scalp_{mode}.json")
         self.state = self._load_state()
         modes = {"limite": [True], "marche": [False]}.get(self.cfg["scalp_entree"], [True, False])
         # « elan » : short pendant une chute ; « rebond » : short après une poussée trop rapide.
@@ -414,7 +458,7 @@ class Scalper:
             self.trend = {s["coin"]["contract"]: s["score"] for s in self.trader.scan()}
             self.funding = {c: v["funding"] for c, v in self.trader.tick.items()}
         except Exception as e:  # tendance indisponible : le scalping continue avec la dernière connue
-            log.info(dim("Tendance non rafraîchie : {}".format(e)))
+            log.info(dim(f"Tendance non rafraîchie : {e}"))
 
     def _trend_loop(self):
         while not self._stop.wait(TREND_REFRESH_S):
@@ -444,13 +488,12 @@ class Scalper:
             sym.get("edge", 0.0) / 10,
         ]
 
-    def expected(self, profile, p, maker_entry):
-        """Gain espéré (pb) d'un trade exécuté : objectif net si gagné, stop + frais si perdu."""
+    def payoff(self, profile, maker_entry):
+        """Gain et perte théoriques nets de frais (pb) : objectif atteint, ou stop touché.
+        Ne sert qu'à dimensionner la position ; la décision utilise le gain net calibré."""
         maker, taker = self.cfg["frais_maker_pct"] * 100, self.cfg["frais_pct"] * 100
         entry_fee = maker if maker_entry else taker
-        win = profile["objectif_bps"] - entry_fee - maker
-        loss = profile["stop_bps"] + entry_fee + taker
-        return p * win - (1 - p) * loss, win, loss
+        return profile["objectif_bps"] - entry_fee - maker, profile["stop_bps"] + entry_fee + taker
 
     def ready(self, key=None):
         n = self.cfg["scalp_apprentissage_min"]
@@ -562,7 +605,7 @@ class Scalper:
             if not gv:
                 continue
             # Trades fantômes : l'agent apprend de chaque signal, même ceux qu'il ne prend pas.
-            sk = "{}/{}/{}".format(c, family, group)
+            sk = f"{c}/{family}/{group}"
             spacing = SHADOW_SPACING_MS if group == "court" else SHADOW_SPACING_LONG_MS
             if t - self.last_shadow.get(sk, 0) >= spacing and self.n_shadows < cfg["scalp_fantomes_max"]:
                 self.last_shadow[sk] = t
@@ -594,7 +637,7 @@ class Scalper:
             pick = self.explore_pick(variants, x)
             if pick:
                 _, fam, prof, maker, key, est = pick
-                _, win, loss = self.expected(prof, est["p"], maker)
+                win, loss = self.payoff(prof, maker)
                 self.open(c, t, side, prof, maker, key, x, est["p"], win, loss, est["net"], explore=True, group=group)
 
     def model_score(self, key, prof, maker, x):
@@ -603,7 +646,7 @@ class Scalper:
         if not self.ready(key):
             return float("-inf"), None, None, None, None
         est = self.models[key].estimate(x)
-        _, win, loss = self.expected(prof, est["p"], maker)  # gains/pertes théoriques : taille seulement
+        win, loss = self.payoff(prof, maker)
         ev = est["net"]
         return ev * (self.fill_rate(key) if maker else 1.0), est["p"], win, loss, ev
 
@@ -697,7 +740,7 @@ class Scalper:
             self.coins[c]["base"],
             "limite" if sim.maker_entry else "marché",
             fmt_price(sim.limit or sim.entry or (self.books[c].bid if side == "short" else self.books[c].ask), "usd"),
-            key, p, ev, pct, dim("(retard {:.0f} ms)".format(self.latencies[-1] if self.latencies else 0))))
+            key, p, ev, pct, dim(f"(retard {self.latencies[-1] if self.latencies else 0:.0f} ms)")))
 
     def _step_real(self, tkey, sim, t, step):
         c = tkey[0]
@@ -743,7 +786,7 @@ class Scalper:
             day["pnl"] += pnl
         else:
             st["serie_pertes"] = 0 if pnl > 0 else st["serie_pertes"] + 1
-            sym["reel"] = (sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):] + [net_bps]
+            sym["reel"] = [*(sym.get("reel") or [])[-(QUARANTINE_TRADES - 1):], net_bps]
         if not sim.explore and len(sym["reel"]) >= QUARANTINE_TRADES and \
                 sum(sym["reel"]) / len(sym["reel"]) <= self.cfg["scalp_quarantaine_bps"]:
             sym["pause_jusqua"], sym["reel"] = sim.closed + QUARANTINE_MS, []
@@ -757,8 +800,8 @@ class Scalper:
                      raison=sim.reason)
         log.info("  ✕ {}{} {} {} en {:.1f} s → {} {}".format(
             "[exploration] " if sim.explore else "", sim.side.upper(), self.coins[c]["base"], sim.reason, duration,
-            (green if pnl >= 0 else red)("{:+.2f} $".format(pnl)),
-            dim("(brut {:+.1f} pb, net {:+.1f} pb)".format(sim.gross_bps(), net_bps))))
+            (green if pnl >= 0 else red)(f"{pnl:+.2f} $"),
+            dim(f"(brut {sim.gross_bps():+.1f} pb, net {net_bps:+.1f} pb)")))
         self.save()
 
     # -- exchange réel (non testé sur un compte : à valider en testnet) -------------------
@@ -777,7 +820,7 @@ class Scalper:
             sim.order_id, sim.market, sim.qty = o.get("id"), m, qty
             return True
         except Exception as e:
-            log.info(red("  Ordre refusé sur {} : {}".format(c, e)))
+            log.info(red(f"  Ordre refusé sur {c} : {e}"))
             return False
 
     def _poll_live(self, now_ms):
@@ -795,7 +838,7 @@ class Scalper:
                         ex.cancel_order(sim.order_id, sim.market)
                         del self.trades[tkey]
             except Exception as e:
-                log.info(yellow("  Suivi d'ordre {} : {}".format(c, e)))
+                log.info(yellow(f"  Suivi d'ordre {c} : {e}"))
         open_live = {k: v for k, v in self.trades.items() if v.state == "ouvert"}
         if not open_live:
             return
@@ -808,7 +851,7 @@ class Scalper:
             try:
                 hit_tp = bool(sim.tp_id) and ex.fetch_order(sim.tp_id, sim.market).get("status") == "closed"
             except Exception:
-                log.info(yellow("  Statut de l'objectif {} inconnu : compté comme stop.".format(c)))
+                log.info(yellow(f"  Statut de l'objectif {c} inconnu : compté comme stop."))
             self._cancel_brackets(sim)
             sim._close(now_ms, sim.tp if hit_tp else sim.sl, hit_tp, "objectif" if hit_tp else "stop")
             del self.trades[tkey]
@@ -821,13 +864,13 @@ class Scalper:
             sim.tp_id = ex.create_order(m, "limit", side, sim.qty, float(ex.price_to_precision(m, sim.tp)),
                                         {"reduceOnly": True}).get("id")
         except Exception as e:
-            log.info(yellow("  ⚠ Objectif non déposé sur {} : {}".format(m, e)))
+            log.info(yellow(f"  ⚠ Objectif non déposé sur {m} : {e}"))
         try:
             sim.sl_id = ex.create_order(m, "market", side, sim.qty, None,
                                         {"stopLossPrice": float(ex.price_to_precision(m, sim.sl)),
                                          "reduceOnly": True}).get("id")
         except Exception as e:
-            log.info(yellow("  ⚠ Stop non déposé sur {} : {}".format(m, e)))
+            log.info(yellow(f"  ⚠ Stop non déposé sur {m} : {e}"))
 
     def _cancel_brackets(self, sim):
         for oid in (sim.tp_id, sim.sl_id):
@@ -835,7 +878,7 @@ class Scalper:
                 try:
                     self.broker.ex.cancel_order(oid, sim.market)
                 except Exception:
-                    log.info(dim("  Annulation de l'ordre {} impossible (déjà exécuté ?)".format(oid)))
+                    log.info(dim(f"  Annulation de l'ordre {oid} impossible (déjà exécuté ?)"))
 
     def _close_live(self, c, sim, t, reason):
         self._cancel_brackets(sim)
@@ -871,7 +914,7 @@ class Scalper:
                 and eq <= st["day_start"] * (1 - cfg["perte_journaliere_max_pct"] / 100):
             st["halted_day"], reason = today, "coupe-circuit journalier"
         if reason:
-            log.info(bold(red("⛔ {} : positions fermées, plus d'ouverture.".format(reason))))
+            log.info(bold(red(f"⛔ {reason} : positions fermées, plus d'ouverture.")))
             for tkey, sim in list(self.trades.items()):
                 c = tkey[0]
                 b = self.books[c]
@@ -979,7 +1022,7 @@ class Scalper:
                 if self._stop.is_set():
                     return
                 self.reconnects += 1
-                q.put(("info", "flux {} coupé ({}), reconnexion dans {} s".format(name, e, delay)))
+                q.put(("info", f"flux {name} coupé ({e}), reconnexion dans {delay} s"))
                 time.sleep(delay)
                 delay = min(delay * 2, 30)
 
@@ -988,7 +1031,7 @@ class Scalper:
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         for path in (self.journal_path, self.curve_path, self.live_path):
             if os.path.exists(path):
-                os.replace(path, "{}.session-{}".format(path, stamp))
+                os.replace(path, f"{path}.session-{stamp}")
         fresh = self._fresh_state()
         kept = {k: self.state[k] for k in ("modeles", "validation", "remplissage", "cryptos", "version_modeles")
                 if k in self.state}
@@ -1002,13 +1045,13 @@ class Scalper:
             self.cfg["capital_initial"], stamp)
 
     def acquire_lock(self):
-        self._lock = open(os.path.join(self.state_dir, ".scalper_{}.lock".format(self.mode)), "w")
+        # Ouvert pour toute la durée du processus : le verrou tombe à sa fermeture.
+        self._lock = open(os.path.join(self.state_dir, f".scalper_{self.mode}.lock"), "w")  # noqa: SIM115
         try:
             fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self._lock.close()
-            raise AlreadyRunning("un agent de scalping {} tourne déjà (service ou autre terminal)".format(
-                self.mode)) from None
+            raise AlreadyRunning(f"un agent de scalping {self.mode} tourne déjà (service ou autre terminal)") from None
 
     def run(self):
         cfg = self.cfg
@@ -1078,7 +1121,7 @@ class Scalper:
 
     def show(self):
         st, s = self.state, self.state["stats"]
-        print(bold("\n  Scalping [{}]".format(self.mode.upper())))
+        print(bold(f"\n  Scalping [{self.mode.upper()}]"))
         print("  Valeur : {} · trades {} · gagnants {:.0f}% · net {:+.2f} $ · frais {:.2f} $ · volume {}".format(
             fmt_price(st["cash"], "usd"), s["trades"], s["gagnants"] / s["trades"] * 100 if s["trades"] else 0,
             s["pnl"], s["frais"], T.fmt_big(s["volume"], "usd")))
@@ -1089,20 +1132,20 @@ class Scalper:
             if m.seen < 50:
                 continue
             good, bad = m.explain()
-            fill = " · ordres exécutés {:.0%}".format(self.fill_rate(key)) if key.endswith("limite") else ""
+            fill = f" · ordres exécutés {self.fill_rate(key):.0%}" if key.endswith("limite") else ""
             said, real = m.calibration()
-            cal = " · annoncé {:.0%} → réel {:.0%}".format(said, real) if said is not None else ""
+            cal = f" · annoncé {said:.0%} → réel {real:.0%}" if said is not None else ""
             hist = self.state["validation"].get(key, [])
             val = " · validation {:+.1f} pb sur {} cas{}".format(
                 sum(hist[-100:]) / len(hist[-100:]), len(hist[-100:]), " ✓" if self.validated(key) else " ✗") if hist else ""
-            print("  {} ({} exemples, {:.0%} gagnants{}{}{}) :".format(key, m.seen, m.base_rate, fill, cal, val))
+            print(f"  {key} ({m.seen} exemples, {m.base_rate:.0%} gagnants{fill}{cal}{val}) :")
             if good:
-                print("    favorable : " + ", ".join("{} ({:+.2f})".format(n, w) for n, w in good))
+                print("    favorable : " + ", ".join(f"{n} ({w:+.2f})" for n, w in good))
             if bad:
-                print("    piège     : " + ", ".join("{} ({:+.2f})".format(n, w) for n, w in bad))
+                print("    piège     : " + ", ".join(f"{n} ({w:+.2f})" for n, w in bad))
         syms = sorted(((c, v) for c, v in st["cryptos"].items() if v["n"] >= 10), key=lambda kv: kv[1]["edge"])
         if syms:
-            fmt = lambda kv: "{} {:+.1f} pb".format(kv[0].replace("USDT", ""), kv[1]["edge"])  # noqa: E731
+            fmt = lambda kv: "{} {:+.1f} pb".format(kv[0].replace("USDT", ""), kv[1]["edge"])
             print("  Cryptos les plus piégeuses : " + ", ".join(fmt(kv) for kv in syms[:4]))
             print("  Cryptos les plus favorables : " + ", ".join(fmt(kv) for kv in reversed(syms[-4:])))
         now = time.time() * 1000
@@ -1118,7 +1161,7 @@ class Scalper:
                 v = float(r["pnl"])
                 print("  {}  {:<8} {:<14} {:>6}s  proba {:>5}  net {:>6} pb  {}  {}".format(
                     dim(r["date"]), r["crypto"], r.get("profil", ""), r["duree_s"], r.get("proba", ""), r.get("net_bps", ""),
-                    (green if v >= 0 else red)("{:+.2f}$".format(v)), dim(r["raison"])))
+                    (green if v >= 0 else red)(f"{v:+.2f}$"), dim(r["raison"])))
 
 
 def format_balance(snap):
@@ -1129,7 +1172,7 @@ def format_balance(snap):
         bold("  Solde [{}] · {}".format(snap["mode"].upper(), datetime.fromtimestamp(snap["maj"]).strftime("%H:%M:%S"))),
         "  Valeur actuelle : {}  ({} depuis le lancement, départ {})".format(
             bold(fmt_price(snap["valeur"], "usd")),
-            (green if total >= 0 else red)("{:+,.2f} $ / {:+.2f}%".format(total, total / cap * 100).replace(",", " ")),
+            (green if total >= 0 else red)(f"{total:+,.2f} $ / {total / cap * 100:+.2f}%".replace(",", " ")),
             fmt_price(cap, "usd")),
         "  Réalisé {:+.2f} $ · en cours {:+.2f} $ · frais payés {:.2f} $".format(
             snap["realise"], snap["latent"], snap["frais"]),
@@ -1159,7 +1202,7 @@ def show_balance(path, follow=False):
         out = format_balance(snap)
         age = time.time() - snap["maj"]
         if age > 15:
-            out += "\n" + yellow("  ⚠ Agent arrêté : dernière mise à jour il y a {:.0f} min.".format(age / 60))
+            out += "\n" + yellow(f"  ⚠ Agent arrêté : dernière mise à jour il y a {age / 60:.0f} min.")
         if follow:
             sys.stdout.write("\033[H\033[J" + out + "\n" + dim("  Ctrl+C pour quitter") + "\n")
             sys.stdout.flush()
@@ -1182,7 +1225,7 @@ def main():
     parser.add_argument("--suivre", action="store_true", help="solde rafraîchi chaque seconde")
     args = parser.parse_args()
     if args.cmd == "solde":
-        show_balance(os.path.join(HERE, "etat_scalp_{}.json".format(args.mode)), args.suivre)
+        show_balance(os.path.join(HERE, f"etat_scalp_{args.mode}.json"), args.suivre)
         return
     T.load_env()
     if args.mode == "reel" and args.cmd == "lancer":
@@ -1194,14 +1237,14 @@ def main():
         try:
             sc.acquire_lock()
         except AlreadyRunning as e:
-            print("Nouvelle session impossible : {}. Arrêtez d'abord l'agent.".format(e))
+            print(f"Nouvelle session impossible : {e}. Arrêtez d'abord l'agent.")
             return
         print(sc.new_session())
     elif args.cmd == "reset":
         try:
             sc.acquire_lock()
         except AlreadyRunning as e:
-            print("Remise à zéro impossible : {}.".format(e))
+            print(f"Remise à zéro impossible : {e}.")
             return
         for p in (sc.state_path, sc.journal_path, sc.live_path, sc.curve_path):
             if os.path.exists(p):
@@ -1211,7 +1254,7 @@ def main():
         try:
             sc.run()
         except AlreadyRunning as e:
-            print(red("Impossible de lancer : {}. Voir le solde : python3 scalper.py solde".format(e)))
+            print(red(f"Impossible de lancer : {e}. Voir le solde : python3 scalper.py solde"))
             sys.exit(1)
         except KeyboardInterrupt:
             print("\n  Scalping arrêté.")

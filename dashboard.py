@@ -118,7 +118,7 @@ def cryptos(state):
 
 
 def build(mode, window_s, base=HERE):
-    path = lambda name: os.path.join(base, name.format(mode))  # noqa: E731
+    path = lambda name: os.path.join(base, name.format(mode))
     live = read_json(path("etat_scalp_{}.json"))
     state = read_json(path("portefeuille_scalp_{}.json"))
     trades = read_csv(path("journal_scalp_{}.csv"))
@@ -145,6 +145,8 @@ def build(mode, window_s, base=HERE):
         "trades": trades[-100:],
         "stats": trade_stats(trades),
         "modeles": models(state, longs),
+        "tendance": read_json(path("etat_tendance_{}.json")),
+        "financement": read_json(path("etat_funding_{}.json")),
         "strategies": groups,
         "cryptos": cryptos(state),
     }
@@ -161,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):  # noqa: N802 (nom imposé par http.server)
+    def do_GET(self):
         url = urlparse(self.path)
         if url.path in ("/", "/index.html"):
             with open(PAGE, "rb") as f:
@@ -187,7 +189,7 @@ def main():
     args = parser.parse_args()
     Handler.mode = args.mode
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print("Tableau de bord : http://localhost:{}  (Ctrl+C pour arrêter)".format(args.port), flush=True)
+    print(f"Tableau de bord : http://localhost:{args.port}  (Ctrl+C pour arrêter)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

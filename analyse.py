@@ -48,12 +48,11 @@ def values():
     """Valeur actuelle (réalisé + latent connu) de chaque portefeuille papier."""
     scalp = read_json("etat_scalp_papier.json") or {}
     fund = read_json("etat_funding_papier.json") or {}
-    trend = read_json("portefeuille_papier.json") or {}
+    trend = read_json("etat_tendance_papier.json") or {}
     return {
         "scalping": scalp.get("valeur"),
         "financement": fund.get("valeur"),
-        # le portefeuille de tendance ne stocke que le réalisé ; les positions ouvertes sont valorisées à l'entrée
-        "tendance": trend.get("cash"),
+        "tendance": trend.get("valeur"),  # réalisé + latent des positions ouvertes
     }
 
 
@@ -104,7 +103,7 @@ def analyse(since_ts):
 
 
 def pct(v):
-    return "—" if v is None else "{:.0f} %".format(v * 100)
+    return "—" if v is None else f"{v * 100:.0f} %"
 
 
 def report(a):
@@ -121,7 +120,7 @@ def report(a):
         s["exploration"]["pnl"]))
     for title, key in (("variantes", "par_variante"), ("sorties", "par_sortie")):
         rows = list(s[key].items())
-        print("  {} : ".format(title) + " · ".join("{} {}/{} {:+.2f} $".format(k, g["gagnants"], g["n"], g["pnl"])
+        print(f"  {title} : " + " · ".join("{} {}/{} {:+.2f} $".format(k, g["gagnants"], g["n"], g["pnl"])
                                                     for k, g in rows[:6]))
     t = a["tendance"]
     print("\nTendance : {} trades fermés · gagnants {} · {:+.2f} $".format(t["trades"], pct(t["taux_gain"]), t["pnl"]))

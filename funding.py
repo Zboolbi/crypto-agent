@@ -138,7 +138,7 @@ def backtest(cfg, days=180, top=40, verbose=True):
     series = {}
     for i, s in enumerate(symbols, 1):
         if verbose:
-            print(dim("  [{}/{}] historique des taux de {}…".format(i, len(symbols), s)), end="\r", flush=True)
+            print(dim(f"  [{i}/{len(symbols)}] historique des taux de {s}…"), end="\r", flush=True)
         h = data.history(s, start - cfg["funding_fenetre_h"] * 3600000)
         if len(h) > 10:
             series[s] = h
@@ -197,9 +197,9 @@ class FundingArb:
         self.cfg = cfg or T.load_config()
         self.mode = mode
         self.data = FundingData()
-        self.state_path = os.path.join(state_dir, "portefeuille_funding_{}.json".format(mode))
-        self.journal_path = os.path.join(state_dir, "journal_funding_{}.csv".format(mode))
-        self.live_path = os.path.join(state_dir, "etat_funding_{}.json".format(mode))
+        self.state_path = os.path.join(state_dir, f"portefeuille_funding_{mode}.json")
+        self.journal_path = os.path.join(state_dir, f"journal_funding_{mode}.csv")
+        self.live_path = os.path.join(state_dir, f"etat_funding_{mode}.json")
         self.state = self._load()
         self.market = {}
 
@@ -303,7 +303,7 @@ class FundingArb:
         self.log("FERMETURE", s, p["qty"], spot_px, perp_px, fees, pnl, reason)
         days = (time.time() * 1000 - p["ouvert"]) / DAY_MS
         print("  {} {} ({}) après {:.1f} j : financement {:+.2f} $ → {}".format(
-            yellow("■ FIN"), s, reason, days, p["financement"], (green if pnl >= 0 else red)("{:+.2f} $".format(pnl))))
+            yellow("■ FIN"), s, reason, days, p["financement"], (green if pnl >= 0 else red)(f"{pnl:+.2f} $")))
 
     def log(self, action, s, qty, spot_px, perp_px, fees, pnl, reason):
         new = not os.path.exists(self.journal_path)
@@ -338,7 +338,7 @@ class FundingArb:
             if perp_loss > 0.8 * p["marge"]:
                 self.close(s, m, "marge du perpétuel épuisée")
             elif should_exit(avg, cfg):
-                self.close(s, m, "taux retombé ({:+.1f} %/an en moyenne)".format(avg))
+                self.close(s, m, f"taux retombé ({avg:+.1f} %/an en moyenne)")
         # 2. Entrées : meilleurs taux d'abord, écart comptant/perpétuel raisonnable
         free = cfg["funding_positions_max"] - len(self.state["positions"])
         candidates = sorted((m for s, m in self.market.items() if s not in self.state["positions"]
@@ -392,7 +392,7 @@ class FundingArb:
             try:
                 self.cycle()
             except Exception as e:  # réseau ou API : on retente au cycle suivant
-                print(red("  Erreur : {}".format(e)), flush=True)
+                print(red(f"  Erreur : {e}"), flush=True)
             time.sleep(CYCLE_S)
 
 
@@ -424,9 +424,9 @@ def main():
         print("  Rendement : {:+.2f} %  (≈ {:+.1f} %/an) · {} positions · {} gagnantes · durée moyenne {:.1f} j".format(
             r["rendement_pct"], r["annualise_pct"] or 0, r["trades"], r["gagnants"], r["duree_moyenne_j"]))
         for s, d, ret in r["meilleurs"]:
-            print("    + {:<12} {:5.1f} j  {:+.2f} %".format(s, d, ret))
+            print(f"    + {s:<12} {d:5.1f} j  {ret:+.2f} %")
         for s, d, ret in r["pires"]:
-            print("    − {:<12} {:5.1f} j  {:+.2f} %".format(s, d, ret))
+            print(f"    − {s:<12} {d:5.1f} j  {ret:+.2f} %")
         print(dim("  Financement réellement versé, frais et glissement inclus ; écart comptant/perpétuel ignoré."))
         return
     fa = FundingArb("papier", cfg)

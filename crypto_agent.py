@@ -37,7 +37,7 @@ USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
 def c(text, code):
-    return "\033[{}m{}\033[0m".format(code, text) if USE_COLOR else str(text)
+    return f"\033[{code}m{text}\033[0m" if USE_COLOR else str(text)
 
 
 def green(t):
@@ -72,13 +72,13 @@ def fmt_price(value, currency):
         return "—"
     sym = CURRENCY_SYMBOLS.get(currency, currency.upper() + " ")
     if value >= 1000:
-        s = "{:,.0f}".format(value)
+        s = f"{value:,.0f}"
     elif value >= 1:
-        s = "{:,.2f}".format(value)
+        s = f"{value:,.2f}"
     elif value >= 0.01:
-        s = "{:.4f}".format(value)
+        s = f"{value:.4f}"
     else:
-        s = "{:.8f}".format(value).rstrip("0")
+        s = f"{value:.8f}".rstrip("0")
     s = s.replace(",", " ")
     return s + " " + sym.strip() if currency == "eur" else sym + s
 
@@ -89,14 +89,14 @@ def fmt_big(value, currency):
     sym = CURRENCY_SYMBOLS.get(currency, currency.upper() + " ").strip()
     for limit, suffix in ((1e12, "T"), (1e9, "Md"), (1e6, "M"), (1e3, "k")):
         if abs(value) >= limit:
-            return "{:.2f} {}{}".format(value / limit, suffix, sym)
-    return "{:.0f} {}".format(value, sym)
+            return f"{value / limit:.2f} {suffix}{sym}"
+    return f"{value:.0f} {sym}"
 
 
 def fmt_pct(value, width=8):
     if value is None:
         return "—".rjust(width)
-    s = "{:+.2f}%".format(value).rjust(width)
+    s = f"{value:+.2f}%".rjust(width)
     return green(s) if value >= 0 else red(s)
 
 
@@ -196,7 +196,7 @@ class CoinGecko:
                         print(dim("  Limite de requêtes atteinte : données en cache utilisées."),
                               file=sys.stderr)
                         return stale
-                    print(dim("  Limite de requêtes atteinte, nouvel essai dans {}s…".format(delay)),
+                    print(dim(f"  Limite de requêtes atteinte, nouvel essai dans {delay}s…"),
                           file=sys.stderr)
                     time.sleep(delay)
                     delay *= 2
@@ -206,13 +206,13 @@ class CoinGecko:
                                          "(ou définissez COINGECKO_API_KEY).") from e
                 if e.code == 404:
                     raise CoinGeckoError("Ressource introuvable : " + path) from e
-                raise CoinGeckoError("Erreur HTTP {} sur {}".format(e.code, path)) from e
+                raise CoinGeckoError(f"Erreur HTTP {e.code} sur {path}") from e
             except urllib.error.URLError as e:
                 if attempt < retries - 1:
                     time.sleep(2)
                     continue
-                raise CoinGeckoError("Connexion impossible : {}".format(e.reason)) from e
-        raise CoinGeckoError("Échec après {} tentatives".format(retries))
+                raise CoinGeckoError(f"Connexion impossible : {e.reason}") from e
+        raise CoinGeckoError(f"Échec après {retries} tentatives")
 
     def top_markets(self, currency="eur", limit=100):
         return self._get("/coins/markets", {
@@ -225,7 +225,7 @@ class CoinGecko:
         })[:limit]
 
     def history(self, coin_id, currency="eur", days=180):
-        data = self._get("/coins/{}/market_chart".format(coin_id), {
+        data = self._get(f"/coins/{coin_id}/market_chart", {
             "vs_currency": currency,
             "days": days,
             "interval": "daily",
@@ -415,7 +415,7 @@ class CryptoAgent:
         for coin in coins:
             if q in coin["name"].lower() or q in coin["id"]:
                 return coin
-        raise CoinGeckoError("« {} » ne fait pas partie du top {}.".format(query, self.limit))
+        raise CoinGeckoError(f"« {query} » ne fait pas partie du top {self.limit}.")
 
     # -- commandes ------------------------------------------------------------
 
@@ -468,12 +468,11 @@ class CryptoAgent:
         changes = [v for v in changes if v is not None]
         up = sum(1 for v in changes if v > 0)
         btc = next((x for x in coins if x["id"] == "bitcoin"), None)
-        print("  Capitalisation cumulée du top {} : {}".format(len(coins), bold(fmt_big(total, self.currency))))
+        print(f"  Capitalisation cumulée du top {len(coins)} : {bold(fmt_big(total, self.currency))}")
         if btc and total:
             print("  Dominance BTC (dans le top {}) : {:.1f}%".format(len(coins), btc["market_cap"] / total * 100))
         if changes:
-            print("  En hausse sur 24h : {} · en baisse : {} · variation médiane : {}".format(
-                green(up), red(len(changes) - up), fmt_pct(sorted(changes)[len(changes) // 2], 0)))
+            print(f"  En hausse sur 24h : {green(up)} · en baisse : {red(len(changes) - up)} · variation médiane : {fmt_pct(sorted(changes)[len(changes) // 2], 0)}")
 
     def _export(self, coins, path):
         fields = ["market_cap_rank", "id", "symbol", "name", "current_price", "market_cap",
@@ -488,7 +487,7 @@ class CryptoAgent:
                 w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
                 w.writeheader()
                 w.writerows(coins)
-        print(cyan("  Export enregistré : {}".format(path)))
+        print(cyan(f"  Export enregistré : {path}"))
 
     def cmd_info(self, query):
         coin = self.resolve(query)
@@ -509,7 +508,7 @@ class CryptoAgent:
                 fmt_price(coin["ath"], cur), fmt_pct(coin.get("ath_change_percentage"), 0)))
         spark = (coin.get("sparkline_in_7d") or {}).get("price") or []
         if spark:
-            print("  7 derniers jours : {}".format(sparkline(spark, 40)))
+            print(f"  7 derniers jours : {sparkline(spark, 40)}")
 
     def cmd_forecast(self, query, horizon=7, history_days=180, show_models=False):
         if not 1 <= horizon <= 90:
@@ -527,8 +526,8 @@ class CryptoAgent:
 
         print()
         print(bold("  Prévision {} ({}) sur {} jour(s)".format(coin["name"], coin["symbol"].upper(), horizon)))
-        print(dim("  Historique : {} jours · {}".format(len(prices), sparkline(prices, 50))))
-        print("  Prix actuel : {}".format(bold(fmt_price(last, cur))))
+        print(dim(f"  Historique : {len(prices)} jours · {sparkline(prices, 50)}"))
+        print(f"  Prix actuel : {bold(fmt_price(last, cur))}")
         print()
 
         # Indicateurs techniques
@@ -537,13 +536,11 @@ class CryptoAgent:
         print(bold("  Indicateurs"))
         if s20 and s50:
             trend = green("haussière") if s20 > s50 else red("baissière")
-            print("  Moyennes mobiles 20j / 50j : {} / {} → tendance {}".format(
-                fmt_price(s20, cur), fmt_price(s50, cur), trend))
+            print(f"  Moyennes mobiles 20j / 50j : {fmt_price(s20, cur)} / {fmt_price(s50, cur)} → tendance {trend}")
         if r is not None:
             zone = red("surachat") if r > 70 else green("survente") if r < 30 else "neutre"
-            print("  RSI 14j : {:.1f} ({})".format(r, zone))
-        print("  Volatilité quotidienne : {:.2f}% (annualisée ≈ {:.0f}%)".format(
-            sigma * 100, sigma * math.sqrt(365) * 100))
+            print(f"  RSI 14j : {r:.1f} ({zone})")
+        print(f"  Volatilité quotidienne : {sigma * 100:.2f}% (annualisée ≈ {sigma * math.sqrt(365) * 100:.0f}%)")
         print()
 
         # Tableau de prévision
@@ -566,16 +563,15 @@ class CryptoAgent:
         final = fc[-1]["mid"]
         change = (final / last - 1) * 100
         verdict = green("HAUSSE") if change > 1 else red("BAISSE") if change < -1 else yellow("STABLE")
-        print("  Tendance estimée à {} j : {} ({})".format(horizon, verdict, fmt_pct(change, 0)))
+        print(f"  Tendance estimée à {horizon} j : {verdict} ({fmt_pct(change, 0)})")
 
         if show_models:
             print()
-            print(bold("  Détail par modèle (J+{})".format(horizon)))
+            print(bold(f"  Détail par modèle (J+{horizon})"))
             labels = {"linear": "Régression linéaire 30j", "holt": "Holt (tendance amortie)",
                       "drift": "Marche aléatoire + dérive"}
             for name, vals in per_model.items():
-                print("  {:<28} {}  {}".format(labels[name], pad(fmt_price(vals[-1], cur), 16, True),
-                                               fmt_pct((vals[-1] / last - 1) * 100)))
+                print(f"  {labels[name]:<28} {pad(fmt_price(vals[-1], cur), 16, True)}  {fmt_pct((vals[-1] / last - 1) * 100)}")
 
         if bt:
             print()
@@ -590,8 +586,7 @@ class CryptoAgent:
         print(dim("     passés. Les cryptomonnaies sont très volatiles : ceci n'est pas un conseil financier."))
 
     def cmd_watch(self, symbols, interval=60, threshold=2.0):
-        print(bold("  Surveillance toutes les {}s — alerte si variation ≥ {}% entre deux relevés.".format(
-            interval, threshold)))
+        print(bold(f"  Surveillance toutes les {interval}s — alerte si variation ≥ {threshold}% entre deux relevés."))
         print(dim("  Ctrl+C pour arrêter."))
         prev = {}
         try:
@@ -600,7 +595,7 @@ class CryptoAgent:
                 watched = [self.resolve(s) for s in symbols] if symbols else coins[:10]
                 stamp = datetime.now().strftime("%H:%M:%S")
                 print()
-                print(dim("  [{}]".format(stamp)))
+                print(dim(f"  [{stamp}]"))
                 for coin in watched:
                     p = coin["current_price"]
                     line = "  {:<8} {}  24h {}".format(
@@ -609,7 +604,7 @@ class CryptoAgent:
                     old = prev.get(coin["id"])
                     if old:
                         delta = (p / old - 1) * 100
-                        line += "   Δ {}".format(fmt_pct(delta))
+                        line += f"   Δ {fmt_pct(delta)}"
                         if abs(delta) >= threshold:
                             line += "  " + bold(yellow("⚡ ALERTE"))
                             sys.stdout.write("\a")
@@ -635,7 +630,7 @@ class CryptoAgent:
 """
 
     def repl(self):
-        print(bold(cyan("\n  🤖 Agent Crypto — top {} par capitalisation".format(self.limit))))
+        print(bold(cyan(f"\n  🤖 Agent Crypto — top {self.limit} par capitalisation")))
         print(self.HELP)
         while True:
             try:
@@ -671,14 +666,14 @@ class CryptoAgent:
                 elif cmd == "devise" and args:
                     self.currency = args[0].lower()
                     self._markets = None
-                    print("  Devise : {}".format(self.currency.upper()))
+                    print(f"  Devise : {self.currency.upper()}")
                 else:
                     # Raccourci : taper directement un symbole affiche ses infos
                     self.cmd_info(raw)
             except CoinGeckoError as e:
-                print(red("  Erreur : {}".format(e)))
+                print(red(f"  Erreur : {e}"))
             except ValueError as e:
-                print(red("  Paramètre invalide : {}".format(e)))
+                print(red(f"  Paramètre invalide : {e}"))
         print("  À bientôt 👋")
 
 
@@ -728,7 +723,7 @@ def main():
         else:
             agent.repl()
     except CoinGeckoError as e:
-        print(red("Erreur : {}".format(e)), file=sys.stderr)
+        print(red(f"Erreur : {e}"), file=sys.stderr)
         sys.exit(1)
 
 

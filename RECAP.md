@@ -1,6 +1,6 @@
 # Récapitulatif du projet crypto-agent
 
-**État au 25/10/2026, 10:15 (heure de Paris, heure d'hiver depuis cette nuit).**
+**État au 25/10/2026, 10:40 (heure de Paris, heure d'hiver depuis cette nuit).**
 Ce document est la référence de travail. Le mettre à jour (date et heure en tête) après chaque étape importante, plutôt que de relire tout le code ou tout l'historique.
 
 ---
@@ -32,7 +32,8 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | `learner.py` | Régression logistique en ligne, calibrage par tranches, garde-fou face à l'inconnu (plus de 4 écarts-types). |
 | `funding.py` | **Arbitrage de financement** : achat au comptant et vente du perpétuel, backtest sur l'historique réel des taux, moteur papier. |
 | `dashboard.py` / `dashboard.html` | Tableau de bord temps réel façon Grafana (bibliothèque standard uniquement). Depuis le 25/10 10:14 : **colonnes distinctes court terme / long terme** (synthèse, résultat de chaque trade, positions ouvertes, derniers trades) ; la stratégie est déduite du nom du profil (`scalp_profils_longs`). |
-| `analyse.py` | Comparaison des 3 stratégies depuis un point de départ (`point-de-depart`, puis `analyse`). |
+| `analyse.py` | Comparaison des 3 stratégies depuis un point de départ (`point-de-depart`, puis `analyse`). La tendance est lue dans `etat_tendance_papier.json` (latent compris). |
+| `pyproject.toml` | Métadonnées et règles ruff du projet (`.venv/bin/ruff check .`). Outils de développement : ruff 0.17.0 et vulture 2.16 (code mort). |
 | `installer_service.sh` / `desinstaller_service.sh` | Services launchd. |
 | `tests/` | `test_core.py`, `test_dashboard.py`, `test_funding.py`. |
 
@@ -63,12 +64,13 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
    - **court** : les 4 profils ci-dessus, familles élan et rebond, **15 % du capital engagés au plus** ;
    - **longue** : profils trente_s (30/25 pb, 30 s), une_min (45/35 pb, 1 min), cinq_min (90/60 pb, 5 min) et dix_min (140/90 pb, 10 min) ; familles élan, rebond et **tendance** (score 15 min ≤ −40 et pression vendeuse) ; **10 % engagés au plus** ; fantômes au plus toutes les 10 s par crypto. Réglages `longue_*` et `scalp_profils_longs`.
 5 ter. **Prolongation de la durée max (depuis le 25/10 10:08)** : à l'échéance, une position perdante après frais est prolongée de sa durée initiale (2 fois au plus) si le flux ne va pas nettement contre elle et si sa perte reste sous 50 % de la distance au stop. Le stop reste actif. Réglages `scalp_prolongation*`. La raison de sortie devient « durée max (prolongée ×N) ».
+5 quater. **Décision sur le gain net calibré (depuis le 25/10 10:20)** : pour chaque tranche de prédiction, le modèle mesure le **résultat net réellement obtenu** (frais, glissement du stop, sorties à la durée max ou sur flux inversé compris), via `learner.estimate()`. Ce chiffre, multiplié par le taux d'exécution pour les ordres limite, remplace la formule théorique p × objectif − (1−p) × stop, qui surestimait tout. `payoff()` ne sert plus qu'à dimensionner la position.
 6. **Trade réel décidé par le modèle** seulement si :
    - le modèle est prêt (200 exemples) ;
    - **la variante est validée hors échantillon** : ses 50 derniers trades fantômes « que le modèle aurait pris » gagnent plus de 1 pb net en moyenne ;
    - le gain espéré calibré dépasse 1 pb.
    Taille : **2 à 10 % du capital** selon la confiance (Kelly fractionné). Plafond total : **25 % du capital engagés** (`scalp_exposition_max_pct`).
-7. **Exploration** : trades de **10 % du capital**, sans plafond horaire, 10 s minimum entre deux trades sur une même crypto et une même stratégie, **budget de pertes de 25 % du capital par jour (2 500 $)**, réglé le 25/10 à 09:57 à la demande de l'utilisateur. Désactivée en mode réel par défaut.
+7. **Exploration ciblée** (depuis le 25/10 10:20) : variante au meilleur gain net calibré + bonus d'incertitude (`scalp_exploration_bonus_bps` = 10 / √(1+n)), seulement si ce score optimiste est ≥ `scalp_exploration_ev_min_bps` = 0. Trades de **10 % du capital**, sans plafond horaire, 10 s minimum entre deux trades sur une même crypto et une même stratégie, **budget de pertes de 25 % du capital par jour (2 500 $)**, réglé le 25/10 à 09:57 à la demande de l'utilisateur. Désactivée en mode réel par défaut.
 8. **Garde-fous** : la variante doit avoir un stop d'au moins 3 fois l'écart achat/vente ; quarantaine d'1 h d'une crypto après 5 trades réels perdants ; coupe-circuits (−15 % par jour, −50 % depuis le plus haut).
 9. **Solde en temps réel** : `.venv/bin/python scalper.py solde [--suivre]`. Bilan : `scalper.py bilan`.
 
@@ -83,9 +85,11 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 | 25/10 08:22–09:57 | Cycle 3, avec la validation hors échantillon | **0 trade de scalping** : aucune variante validée, budget d'exploration du jour épuisé. Cycle interrompu. |
 | 25/10 09:57 | **Nouvelle session** (`scalper.py nouvelle-session`) : portefeuille neuf à 10 000 $, modèles et validation conservés. Plafonds : 10 % par trade, 25 % engagés, budget d'exploration 25 %/jour. | Ancien journal archivé en `*.session-20261025-0957`. |
 | 25/10 10:05 | **Stratégie longue ajoutée** (30 s à 10 min) en parallèle du scalping court. | À 10:07 : 77 trades d'exploration, 48 % gagnants, −45,16 $. |
+| 25/10 10:19 | **Diagnostic** : 100 % des pertes viennent de l'exploration (variantes tirées au hasard) ; gain espéré théorique faux (validation des variantes « choisies » entre −9 et −27 pb) ; modèles longs trop confiants. Correction : décision sur le gain net calibré + exploration ciblée + validation remise à zéro. | Avant (09:57–10:19) : 121 trades, 46 % gagnants, −80,85 $, −7,9 pb/trade. Après (10:20–10:36) : 75 trades, 47 %, −40,00 $, −6,6 pb/trade. Seuils d'exploration resserrés à 10:40. |
+| 25/10 10:35 | **Revue du code** : code mort retiré (`calibrated()`, métriques `accuracy`/`brier`, `expected()` → `payoff()`) ; 131 corrections ruff (f-strings) ; `pyproject.toml`. Tendance : état temps réel et plafonds 10 %/25 % (`tendance_*`). Tableau de bord : panneaux tendance et financement. Données papier archivées retirées du dépôt. | Commits poussés sur GitHub à la demande de l'utilisateur. |
 | 25/10 10:08 | Prolongation de la durée max ; à 10:14, tableau de bord séparé court/long. | À 10:14 : court 91 trades (−50,72 $ d'exploration), long 11 trades, 27 % gagnants, −30,25 $. Tout est encore de l'exploration. |
 
-**Soldes à 10:07** : scalping 9 954,84 $ (nouvelle session à 10 000 $ depuis 09:57) ; tendance 9 699,53 $ (3 shorts ouverts depuis 01:15 : DOT, AAVE, JUP) ; financement 9 995,08 $ (1 position INIT à environ 11 %/an, +0,20 $ encaissés).
+**Soldes à 10:37** : scalping 9 877,26 $ (nouvelle session à 10 000 $ depuis 09:57) ; tendance **10 118,25 $ dont environ +419 $ latents** (positions DOT, AAVE, JUP ouvertes avant les plafonds, avec des tailles de 7 à 11 k$) ; financement 9 994,40 $. Anciens soldes, pour mémoire : tendance 9 699,53 $ (3 shorts ouverts depuis 01:15 : DOT, AAVE, JUP) ; financement 9 995,08 $ (1 position INIT à environ 11 %/an, +0,20 $ encaissés).
 
 ## 7. Ce que les données ont établi (ne pas re-démontrer)
 
@@ -94,14 +98,15 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 - **Le calibrage est maintenant juste** (annoncé ≈ réel). Le défaut restant était le « meilleur choix parmi 16 », corrigé par la validation hors échantillon.
 - **Latence** : 150 à 300 ms entre Binance et le Mac. Le traitement prend 3 à 4 µs par message (Python 3.12), donc le calcul n'est jamais le frein.
 - **Financement** : sur 11 mois, le meilleur taux moyen est d'environ 5 %/an (PUMP, HYPE), BTC 3,2 %, médiane négative. Le meilleur backtest donne environ +1,2 %/an ; détenir toute l'année la meilleure crypto rapporterait au plus environ 3 % sur le capital. Aller-retour : 0,50 % de frais.
-- **Tendance** : backtests d'octobre entre −1 et +10 % selon la crypto, échantillons petits. Aucun trade fermé pendant les cycles de 4 h.
+- **Tendance** : backtests d'octobre entre −1 et +10 % selon la crypto, échantillons petits. Ses positions restent ouvertes des heures ; son journal n'enregistre qu'ouvertures et fermetures, d'où l'impression qu'il « ne bouge pas ». Le gain latent n'était pas affiché avant le 25/10 10:35.
+- **Frais des plateformes** (recherche du 25/10, sources secondaires, à vérifier sur les pages officielles) : Binance et OKX 0,020 % / 0,050 % (BNB : −10 %) ; Bybit 0,020 % / 0,055 % ; Hyperliquid (DEX) 0,015 % / 0,045 %, dégressif avec le volume ; MEXC annoncé à 0 % / 0,02 % sur l'écran mais 0,01 % / 0,05 % via l'API depuis mars 2026, et sans licence MiCA dans l'UE selon une source. Une source indique que Binance a suspendu une partie de ses services dans l'UE depuis juillet 2026 en attendant MiCA : **à vérifier avant tout passage en réel depuis la France**. Le gain sur les frais existe (Hyperliquid : environ −25 % sur l'aller-retour taker) mais ne compense pas un avantage brut nul (élan environ 0 pb brut).
 
 ## 8. Consignes et préférences de l'utilisateur
 
 - **Objectif déclaré** : gagner de l'argent le plus vite possible, beaucoup de trades, au moins 55 % de gagnants, solde en hausse. Shorts privilégiés ; positions courtes ou longues acceptées.
 - **Il veut une analyse franche**, avec des chiffres vérifiés. Ne rien promettre, et toujours vérifier un gain spectaculaire avant de l'annoncer (cf. l'artefact du cycle 1).
 - Mode papier uniquement pour l'instant. **Le mode réel n'a jamais été activé** et le chemin testnet/réel du scalper n'a pas été testé sur un compte.
-- **Ne pas pousser sur GitHub** sans demande explicite.
+- **Ne pas pousser sur GitHub** sans demande explicite. (Le 25/10 vers 10:20, il a demandé de pousser : fait, et à refaire à la fin de cette série de changements.)
 - Refusé : se connecter à son compte ChatGPT (identifiants d'un autre service). Hors périmètre : modifier les réglages de sécurité macOS (accès complet au disque).
 - Il demande des cycles de test de 4 h, puis analyse, optimisation et nouveau cycle, jusqu'à de nouvelles consignes.
 - 25/10 09:50 : il veut que chaque position soit au moins gagnante, frais compris. Fait établi : un objectif atteint l'est toujours ; seuls le stop, la durée maximale et le flux inversé peuvent fermer en perte. **Question en attente** : bloquer les sorties en perte autres que le stop (durée maximale et flux inversé ne fermeraient plus en perte) ? Le stop doit rester.
@@ -111,8 +116,10 @@ Un agent de trading crypto **en mode papier (argent fictif)**. Il fait tourner t
 
 ## 9. Points ouverts et pistes
 
+0. **Prochaine étape** : mesurer l'exploration ciblée resserrée (10:40) sur au moins 1 h ; suivre la validation des variantes ; vérifier si la tendance clôture ses positions en gain (stops suiveurs).
 1. **Les trades actuels sont presque tous d'exploration** (aucune variante validée). Avec un budget de 2 500 $/jour, l'exploration peut faire baisser le solde ; à surveiller. Observer si des variantes longues (cinq_min, dix_min, tendance) passent la validation.
 1 bis. La ligne « Profils » du journal au démarrage n'affiche que les profils courts (cosmétique).
+1 ter. Les positions de tendance ouvertes avant les plafonds (DOT, AAVE, JUP, TRX) gardent leur taille d'origine jusqu'à leur clôture.
 2. **Tendance** : 3 shorts ouverts depuis 01:15 sans clôture ; la vérifier dans le prochain bilan.
 3. **Financement** : stable mais lent ; il faut des jours pour juger.
 4. Le tableau de bord n'affiche que le scalping ; la tendance et le financement n'y figurent pas.

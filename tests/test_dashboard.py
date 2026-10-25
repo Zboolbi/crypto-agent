@@ -12,7 +12,7 @@ from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import dashboard  # noqa: E402
+import dashboard
 
 
 class BuildTest(unittest.TestCase):
@@ -26,7 +26,7 @@ class BuildTest(unittest.TestCase):
         with open(os.path.join(d, "courbe_scalp_papier.csv"), "w") as f:
             f.write("t,valeur,realise,latent,trades\n")
             for i in range(2000):
-                f.write("{},{},0,0,0\n".format(now - 7200 + i * 3.6, 10000 + i))
+                f.write(f"{now - 7200 + i * 3.6},{10000 + i},0,0,0\n")
         with open(os.path.join(d, "journal_scalp_papier.csv"), "w") as f:
             f.write("date,crypto,sens,profil,proba,entree,sortie,notionnel,duree_s,brut_bps,net_bps,pnl,raison\n")
             f.write("2026-10-25 00:00:00,BTC,short,elan/rapide/limite,0.6,100,99.8,1000,12,20,16,1.6,objectif\n")
@@ -64,7 +64,7 @@ class ServerTest(unittest.TestCase):
     def test_routes(self):
         srv = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        base = "http://127.0.0.1:{}".format(srv.server_address[1])
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
         try:
             page = urllib.request.urlopen(base + "/").read().decode()
             self.assertIn("Crypto Agent", page)

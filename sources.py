@@ -48,7 +48,7 @@ def http_json(url, params=None, timeout=10, retries=3):
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            last = "HTTP {}".format(e.code)
+            last = f"HTTP {e.code}"
             if e.code not in (418, 429, 500, 502, 503, 504):
                 break
         except (urllib.error.URLError, OSError, ValueError) as e:
@@ -114,7 +114,7 @@ def top_coins(limit=100, coingecko=None):
             if coins:
                 return coins, name
         except Exception as e:
-            errors.append("{} ({})".format(name, e))
+            errors.append(f"{name} ({e})")
     raise DataError("Aucune source de classement disponible : " + ", ".join(errors))
 
 
@@ -217,7 +217,7 @@ class MarketData:
     def __init__(self, venue="binance"):
         primary = VENUES.get(venue, BinanceFutures)()
         others = [cls() for name, cls in VENUES.items() if name != primary.name]
-        self.venues = [primary] + others
+        self.venues = [primary, *others]
         self._contracts = None
         self._contracts_ts = 0
         self._venue_of_contracts = None
@@ -228,7 +228,7 @@ class MarketData:
             try:
                 return v, getattr(v, method)(*args, **kwargs)
             except Exception as e:
-                errors.append("{} ({})".format(v.name, e))
+                errors.append(f"{v.name} ({e})")
         raise DataError("Données de marché indisponibles : " + ", ".join(errors))
 
     def contracts(self):
@@ -342,9 +342,9 @@ class WebSocket:
         self.sock.settimeout(timeout)
         key = base64.b64encode(os.urandom(16)).decode()
         path = u.path + ("?" + u.query if u.query else "")
-        self.sock.sendall(("GET {} HTTP/1.1\r\nHost: {}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                           "Sec-WebSocket-Key: {}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: {}\r\n\r\n")
-                          .format(path, host, key, USER_AGENT).encode())
+        self.sock.sendall((f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                           f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: {USER_AGENT}\r\n\r\n")
+                          .encode())
         self.buf = bytearray()
         while b"\r\n\r\n" not in self.buf:
             self._fill()
@@ -423,7 +423,7 @@ def binance_stream_urls(contracts, chunk=STREAM_CHUNK):
     groups = [names[i:i + chunk] for i in range(0, len(names), chunk)]
     urls = {}
     for i, g in enumerate(groups, 1):
-        tag = " {}/{}".format(i, len(groups)) if len(groups) > 1 else ""
+        tag = f" {i}/{len(groups)}" if len(groups) > 1 else ""
         urls["transactions" + tag] = base.format("market") + "/".join(n + "@aggTrade" for n in g)
         urls["carnet" + tag] = base.format("public") + "/".join(n + "@depth5@100ms" for n in g)
     return urls
