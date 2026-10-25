@@ -143,6 +143,7 @@ class ScalperTest(unittest.TestCase):
             m.cal_n, m.cal_w = [100.0] * 10, [(90.0 if good else 1.0)] * 10
             m.scaler.count, m.scaler.m2 = 1000, [1e9] * len(FEATURES)  # contextes déjà vus
             sc.state["remplissage"][key] = 0.9
+            sc.state["validation"][key] = [5.0] * 60 if good else [-5.0] * 60  # validé hors échantillon
         t = self._sell_burst(30000)
         self.assertIn("BTCUSDT", sc.trades)
         sim = sc.trades["BTCUSDT"]
@@ -193,6 +194,35 @@ class ScalperTest(unittest.TestCase):
             snap = json.load(f)
         self.assertEqual(snap["valeur"], CFG["capital_initial"])
         self.assertIn("Valeur actuelle", scalper.format_balance(snap))
+
+
+class ValidationTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        cfg = json.loads(json.dumps(CFG))
+        cfg["scalp_exploration"] = False
+        self.sc = scalper.Scalper("papier", cfg, state_dir=self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_variant_needs_positive_out_of_sample_results(self):
+        sc, key = self.sc, "elan/rapide/marche"
+        self.assertFalse(sc.validated(key), "aucun historique : pas de trade réel")
+        sc.state["validation"][key] = [-5.0] * 60
+        self.assertFalse(sc.validated(key), "les trades choisis perdaient")
+        sc.state["validation"][key] = [3.0] * 60
+        self.assertTrue(sc.validated(key))
+
+    def test_only_chosen_shadows_feed_validation(self):
+        sc = self.sc
+        for would in (True, False):
+            sim = scalper.SimTrade("short", 0, book(), PROFILE, CFG, False, "elan/eclair/marche",
+                                   features=[0.0] * len(FEATURES), latency_ms=0)
+            sim.would = would
+            sim._close(10, sim.entry * 0.999, True, "objectif")
+            sc.learn("BTCUSDT", sim)
+        self.assertEqual(len(sc.state["validation"]["elan/eclair/marche"]), 1)
 
 
 class ExplorationTest(unittest.TestCase):

@@ -100,6 +100,8 @@ DEFAULT_CONFIG = {
     "scalp_taille_min_pct": 5,         # taille selon la confiance du modèle, en % du capital
     "scalp_taille_max_pct": 60,
     "scalp_ev_min_bps": 1.0,           # gain espéré minimal après frais pour un trade réel
+    "scalp_validation_min": 50,        # trades fantômes « choisis » requis pour valider une variante
+    "scalp_validation_min_bps": 1.0,   # leur résultat net moyen doit dépasser ce seuil
     "scalp_apprentissage_min": 200,    # trades fantômes par profil avant le premier trade réel
     "scalp_quarantaine_bps": -10,      # pause 1 h si les 5 derniers trades réels perdent plus en moyenne
     "scalp_fantomes_max": 10000,

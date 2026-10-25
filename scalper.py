@@ -140,7 +140,7 @@ class SimTrade:
     __slots__ = ("side", "profile", "key", "features", "p", "notional", "maker_entry", "limit", "queue", "deadline",
                  "entry", "opened", "tp", "sl", "max_ms", "state", "exit", "reason", "fee_bps",
                  "maker_bps", "taker_bps", "flow_exit", "order_id", "market", "tp_id", "sl_id", "qty", "closed",
-                 "explore", "lat", "active", "tp_active")
+                 "explore", "lat", "active", "tp_active", "would")
 
     def __init__(self, side, t, book, profile, cfg, maker, key=None, features=None, p=None, notional=0.0,
                  latency_ms=None):
@@ -156,6 +156,7 @@ class SimTrade:
         self.order_id = self.market = self.tp_id = self.sl_id = None
         self.qty = 0.0
         self.explore = False
+        self.would = False  # le modèle aurait-il pris ce trade ? (validation hors échantillon)
         self.fee_bps = 0.0
         # Latence aller-retour : l'agent voit le marché en retard et son ordre met encore du temps à
         # atteindre l'exchange. Rien ne peut être exécuté avant `active`.
@@ -301,6 +302,7 @@ class Scalper:
                 st = json.load(f)
             if "modeles" in st:
                 st.setdefault("remplissage", {})
+                st.setdefault("validation", {})
                 if st.get("version_modeles", 1) < 3:
                     # Avant la version 3, la simulation exécutait les ordres sans latence (gains irréalistes) :
                     # portefeuille, journal et modèles archivés, on repart d'un état propre.
@@ -321,7 +323,7 @@ class Scalper:
                 os.replace(self.journal_path, self.journal_path + ".ancien")
         cap = self.cfg["capital_initial"]
         return {"cash": cap, "peak": cap, "day": None, "day_start": cap, "halted": False, "halted_day": None,
-                "modeles": {}, "version_modeles": 3, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
+                "modeles": {}, "validation": {}, "version_modeles": 3, "remplissage": {}, "cryptos": {}, "serie_pertes": 0,
                 "stats": {"trades": 0, "gagnants": 0, "pnl": 0.0, "frais": 0.0, "volume": 0.0,
                           "ordres": 0, "executes": 0, "fantomes": 0, "debut": time.time(),
                           "exploration": 0, "exploration_pnl": 0.0}}
@@ -469,6 +471,10 @@ class Scalper:
 
     def learn(self, c, sim):
         net = sim.net_bps()
+        if sim.would and not sim.notional:  # fantôme que le modèle aurait choisi : test hors échantillon
+            hist = self.state["validation"].setdefault(sim.key, [])
+            hist.append(round(net, 2))
+            del hist[:-200]
         if sim.maker_entry:
             self._fill_stat(sim.key, 1.0)
         self.models[sim.key].update(sim.features, 1.0 if net > 0 else 0.0)
@@ -521,8 +527,10 @@ class Scalper:
                 self.n_shadows < cfg["scalp_fantomes_max"]:
             self.last_shadow[sk] = t
             for fam, prof, maker in variants:
-                self.shadows[c].append(SimTrade(side, t, b, prof, cfg, maker, model_key(fam, prof, maker),
-                                                features=x, latency_ms=self.sim_latency))
+                key = model_key(fam, prof, maker)
+                sim = SimTrade(side, t, b, prof, cfg, maker, key, features=x, latency_ms=self.sim_latency)
+                sim.would = self.model_score(key, prof, maker, x)[0] >= cfg["scalp_ev_min_bps"]
+                self.shadows[c].append(sim)
                 self.n_shadows += 1
 
         if c in self.trades or not self.can_open() or self.paused(c, t):
@@ -530,11 +538,9 @@ class Scalper:
         best = None
         for fam, prof, maker in variants:
             key = model_key(fam, prof, maker)
-            if not self.ready(key):
+            if not self.ready(key) or not self.validated(key):
                 continue
-            p, _ = self.models[key].calibrated(x)  # probabilité corrigée par les résultats réels
-            ev, win, loss = self.expected(prof, p, maker)
-            score = ev * (self.fill_rate(key) if maker else 1.0)  # un ordre non exécuté ne rapporte rien
+            score, p, win, loss, ev = self.model_score(key, prof, maker, x)
             if best is None or score > best[0]:
                 best = (score, prof, maker, key, p, win, loss, ev)
         if best and best[0] >= cfg["scalp_ev_min_bps"]:
@@ -548,6 +554,21 @@ class Scalper:
             p = m.calibrated(x)[0] if m.seen >= 50 else m.base_rate
             ev, win, loss = self.expected(prof, p, maker)
             self.open(c, t, side, prof, maker, key, x, p, win, loss, ev, explore=True)
+
+    def model_score(self, key, prof, maker, x):
+        """Gain espéré (pb) de la variante selon le modèle calibré, pondéré par l'exécution des ordres limite."""
+        if not self.ready(key):
+            return float("-inf"), None, None, None, None
+        p, _ = self.models[key].calibrated(x)
+        ev, win, loss = self.expected(prof, p, maker)
+        return ev * (self.fill_rate(key) if maker else 1.0), p, win, loss, ev
+
+    def validated(self, key):
+        """La variante n'a le droit de trader que si les trades fantômes que le modèle aurait pris
+        ont réellement gagné, après frais, sur un nombre suffisant de cas récents."""
+        hist = self.state["validation"].get(key, [])
+        n = self.cfg["scalp_validation_min"]
+        return len(hist) >= n and sum(hist[-n:]) / n >= self.cfg["scalp_validation_min_bps"]
 
     def can_explore(self, t, c=None):
         cfg = self.cfg
@@ -983,7 +1004,10 @@ class Scalper:
             fill = " · ordres exécutés {:.0%}".format(self.fill_rate(key)) if key.endswith("limite") else ""
             said, real = m.calibration()
             cal = " · annoncé {:.0%} → réel {:.0%}".format(said, real) if said is not None else ""
-            print("  {} ({} exemples, {:.0%} gagnants{}{}) :".format(key, m.seen, m.base_rate, fill, cal))
+            hist = self.state["validation"].get(key, [])
+            val = " · validation {:+.1f} pb sur {} cas{}".format(
+                sum(hist[-100:]) / len(hist[-100:]), len(hist[-100:]), " ✓" if self.validated(key) else " ✗") if hist else ""
+            print("  {} ({} exemples, {:.0%} gagnants{}{}{}) :".format(key, m.seen, m.base_rate, fill, cal, val))
             if good:
                 print("    favorable : " + ", ".join("{} ({:+.2f})".format(n, w) for n, w in good))
             if bad:
