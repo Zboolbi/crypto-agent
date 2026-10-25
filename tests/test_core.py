@@ -263,11 +263,25 @@ class BudgetTest(unittest.TestCase):
         self.assertFalse(sc.paused("BTCUSDT", 0), "quarantaine levée")
 
 
+class ExplorationOffTest(unittest.TestCase):
+    def test_no_real_trade_without_validation_but_shadows_keep_learning(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        sc = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=tmp.name)  # réglages par défaut
+        sc.coins, sc.books = {"BTCUSDT": {"base": "BTC"}}, {"BTCUSDT": scalper.Book()}
+        sc.on_depth("BTCUSDT", 10000, [["99.99", "5"]] * 5, [["100", "1"]] * 5)
+        for i in range(30):
+            sc.on_trade("BTCUSDT", 10000 + i * 200, 100 * (1 - i * 0.0001), 1000.0, True)
+        self.assertFalse(sc.trades, "exploration coupée et aucune variante validée : aucun trade réel")
+        self.assertTrue(any(sc.shadows.values()), "les trades fantômes continuent")
+
+
 class ExplorationTest(unittest.TestCase):
     def make(self, mode="papier", **over):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         cfg = json.loads(json.dumps(CFG))
+        cfg["scalp_exploration"] = True  # coupée par défaut depuis le 25/10 ; ces tests vérifient son fonctionnement
         cfg.update(over)
         sc = scalper.Scalper(mode, cfg, state_dir=self.tmp.name)
         sc.coins = {"BTCUSDT": {"base": "BTC"}}
@@ -461,7 +475,8 @@ class RebondExitTest(unittest.TestCase):
 class TargetedExplorationTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.sc = scalper.Scalper("papier", json.loads(json.dumps(CFG)), state_dir=self.tmp.name)
+        self.sc = scalper.Scalper("papier", {**json.loads(json.dumps(CFG)), "scalp_exploration": True},
+                                  state_dir=self.tmp.name)
 
     def tearDown(self):
         self.tmp.cleanup()

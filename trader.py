@@ -128,7 +128,7 @@ DEFAULT_CONFIG = {
     "scalp_fantomes_max": 10000,
     "scalp_positions_max": 0,          # 0 = pas de limite : seul le levier borne l'exposition
     "scalp_long": False,               # short uniquement
-    "scalp_exploration": True,         # trades réels de petite taille pendant et après l'apprentissage
+    "scalp_exploration": False,        # coupée le 25/10 : 95 % des pertes ; l'apprentissage passe par les fantômes
     "scalp_exploration_taille_pct": 10,  # taille d'un trade d'exploration, en % du capital
     "scalp_exploration_par_heure": 0,  # 0 = pas de plafond horaire
     "scalp_exploration_espacement_s": 10,  # délai minimal entre deux explorations sur une même crypto
